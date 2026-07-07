@@ -73,3 +73,20 @@ export interface Kpis {
   referred: number;
   female: number;
 }
+
+export type ApiSource = "local" | "kobo" | "kobo-fallback";
+
+export interface ApiMeta {
+  source: ApiSource;
+  count: number;
+  uid?: string;
+  name?: string;
+  version?: string;
+  baseUrl?: string;
+  fetchedAt?: string;
+  error?: string;
+  /** True when Kobo returned more submissions than we cap (50 pages × 1 000). */
+  truncated?: boolean;
+  /** Total matching rows reported by Kobo (`count` field on `/data/`). */
+  totalCount?: number;
+}

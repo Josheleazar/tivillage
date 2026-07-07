@@ -1,11 +1,13 @@
 import { Activity, Database } from "lucide-react";
-import type { FeedbackRecord } from "@/lib/types";
+import type { ApiMeta, FeedbackRecord } from "@/lib/types";
+import { SourceChip } from "./source-chip";
 
 interface HeaderProps {
   records: FeedbackRecord[];
+  meta: ApiMeta | null;
 }
 
-export function DashboardHeader({ records }: HeaderProps) {
+export function DashboardHeader({ records, meta }: HeaderProps) {
   const dates = records
     .map((r) => r.Date)
     .filter((d): d is string => !!d)
@@ -48,9 +50,7 @@ export function DashboardHeader({ records }: HeaderProps) {
               <span className="opacity-70">→</span>
               <span className="tabular-nums">{maxDate}</span>
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 font-semibold">
-              Data&nbsp;:&nbsp;Kobo CSV export
-            </span>
+            <SourceChip meta={meta} />
           </div>
         )}
       </div>

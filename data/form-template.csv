@@ -1,0 +1,43 @@
+survey
+type,name,label,required
+date,date,Date,FALSE
+text,activity,Activity,FALSE
+select_one feedback_channel,feedback_channel,Feedback Channel used,FALSE
+select_one feedback_category,feedback_category,Feedback Category,FALSE
+select_one yes_no,is_emergency,Emergency Feedback,FALSE
+select_one thematic_area,thematic_area,Thematic Area,FALSE
+text,project_code,Project related to feedback,FALSE
+text,district,District,FALSE
+text,subcounty,Subcounty,FALSE
+text,village,Village,FALSE
+text,respondent_name,Who is giving feedback?,FALSE
+select_one gender,gender,Gender,FALSE
+integer,age,Age,FALSE
+text,feedback_text,"Description of feedback, suggestion or complaint",FALSE
+text,actions_taken,Description of actions taken,FALSE
+text,referral_status,Referral Status,FALSE
+select_one feedback_status,feedback_status,Status of this feedback,FALSE
+date,date_resolved,Date feedback was resolved,FALSE
+integer,days_to_resolve,Days taken to resolved this feedback,FALSE
+select_one yes_no,reported_to_integrity,Reported to Integrity Focal Person,FALSE
+select_one yes_no,requires_urgent_response,Feedback requires urgent response,FALSE
+text,categorized_as,Feedback Categorized as,FALSE
+choices
+list_name,name,label
+yes_no,yes,Yes
+yes_no,no,No
+gender,male,Male
+gender,female,Female
+feedback_status,new_feedback,New Feedback
+feedback_status,under_investigation,Old Feedback Under investigations
+feedback_status,resolved_closed,Resolved & Closed
+feedback_channel,face-to-face_feedback_form,Face-to-face/feedback Form
+feedback_channel,tollfree_hotline_and_sms,Tollfree Hotline & SMS
+feedback_category,feedback_or_suggestion,Feedback or Suggestion
+feedback_category,non-sensitive_complaint,Non-Sensitive Complaint
+feedback_category,request_for_assistance,Request for assistance
+thematic_area,health,Health
+thematic_area,sustainable_livelihoods,Sustainable Livelihoods
+settings
+form_title,form_id,version
+Cordaid Feedback Dashboard Test,cordaid_feedback_dashboard_test,20250707

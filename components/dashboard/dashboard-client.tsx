@@ -8,7 +8,7 @@ import { FeedbackTable } from "@/components/dashboard/feedback-table";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { KpiCards } from "@/components/dashboard/kpi-cards";
 import { computeKpis, applyFilters, downloadCsv, toCsv } from "@/lib/filters";
-import type { FeedbackRecord, Filters } from "@/lib/types";
+import type { ApiMeta, FeedbackRecord, Filters } from "@/lib/types";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 const DATE_BOUNDS_KEY = "cordaid-date-bounds";
@@ -23,6 +23,7 @@ function withDefaultDates(filters: Filters, bounds: { min: string; max: string }
 
 export function DashboardClient() {
   const [records, setRecords] = useState<FeedbackRecord[]>([]);
+  const [meta, setMeta] = useState<ApiMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters | null>(null);
@@ -35,9 +36,13 @@ export function DashboardClient() {
       try {
         const res = await fetch("/api/feedback", { cache: "no-store" });
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
-        const data = (await res.json()) as { records: FeedbackRecord[] };
+        const data = (await res.json()) as {
+          records: FeedbackRecord[];
+          meta?: ApiMeta;
+        };
         if (cancelled) return;
         setRecords(data.records);
+        setMeta(data.meta ?? null);
         const dates = data.records
           .map((r) => r.Date)
           .filter((d): d is string => !!d)
@@ -158,7 +163,7 @@ export function DashboardClient() {
 
   return (
     <>
-      <DashboardHeader records={records} />
+      <DashboardHeader records={records} meta={meta} />
       <main className="container py-6 space-y-6">
         <FilterBar
           filters={filters}
