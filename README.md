@@ -97,6 +97,7 @@ git or fall back when an XLSForm upload fails for some reason.
 | `data/feedback.xlsx` | 316 submission rows (frozen header, widths tuned, dark Cordaid-red header fill). Drop into **Data → Replace data**. |
 | `data/form-template.csv` | Same XLSForm as a single CSV with `survey` / `choices` / `settings` marker rows — git-diff-friendly. |
 | `data/feedback.csv` | Same submissions as `feedback.xlsx` in flat CSV form — git-diff-friendly. |
+| `data/feedback.jsonl` | One JSON submission per line, field names match the XLSForm `name` attributes exactly. Used by the API-based bulk-seed path below when the UI does not expose Replace data. |
 
 ### Step 1 — create the form (≈ 30 s)
 
@@ -107,9 +108,49 @@ git or fall back when an XLSForm upload fails for some reason.
 
 ### Step 2 — upload the 316 records
 
+Pick **A** if your Kobo deployment exposes **Data → Replace data**. Pick **B** if the UI does not (EU humanitarian server, locked-down projects, older versions, or any environment where `Replace data` is hidden behind project-level restrictions).
+
+**A · UI bulk import**
+
 1. From the form summary, click **Data → Replace data** (or **Import → Records**).
 2. Drop `data/feedback.xlsx` (or `data/feedback.csv`).
 3. Kobo ingests all 316 rows; the row count on the Reports tab should match.
+
+**B · API bulk seed (works on every Kobo version)**
+
+The KoboToolbox KPI v2 API accepts `POST /api/v2/assets/{asset_uid}/submissions/` for new submissions — no UI required. Each line of `data/feedback.jsonl` is one ready-to-POST submission (the XLSForm `name` attributes, with `select_one` values already normalised to the choice `name`s).
+
+Load the env vars, then loop through the file:
+
+```bash
+# 1. Pick up KOBO_API_TOKEN / KOBO_ASSET_UID / KOBO_BASE_URL from .env.local
+#    (Vercel injects them on the dashboard side; locally we source them.)
+set -a; source .env.local; set +a
+
+# 2. POST every record — one HTTP request per line, 200 ms apart to stay
+#    well under Kobo's throttle.
+while IFS= read -r line; do
+  curl -sS -o /dev/null -w "%{http_code}\n" \
+    -X POST \
+    -H "Authorization: Token ${KOBO_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "${line}" \
+    "${KOBO_BASE_URL}/api/v2/assets/${KOBO_ASSET_UID}/submissions/"
+  sleep 0.2
+done < data/feedback.jsonl
+```
+
+Verify the count before reloading the dashboard:
+
+```bash
+curl -s -H "Authorization: Token ${KOBO_API_TOKEN}" \
+  "${KOBO_BASE_URL}/api/v2/assets/${KOBO_ASSET_UID}/data/?limit=1" \
+  | python3 -c 'import json,sys;d=json.load(sys.stdin);print("Kobo totalCount =",d.get("count"))'
+```
+
+You want `Kobo totalCount = 316`. If still 0, the asset UID is wrong (or you uploaded to a different form) — re-check the URL of the form you're seeding.
+
+> Note on `_id` / `_uuid`: Kobo assigns those server-side, so they're not included in the JSONL payload — Kobo is the source of truth for those fields. `_submission_time` **is** included so historical dates round-trip faithfully.
 
 ### Step 3 — point the dashboard at it
 
