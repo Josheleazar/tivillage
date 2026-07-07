@@ -8,27 +8,46 @@ import type {
 const STATUS_OPEN = new Set(["New Feedback", "Old Feedback Under investigations"]);
 const STATUS_RESOLVED = new Set(["Resolved & Closed"]);
 
+// Text-searchable fields shared by `applyFilters` (page-level search) and
+// `searchRecords` (table-level quick filter). Keep both in sync via this
+// single source of truth.
+export const SEARCH_FIELDS: (keyof FeedbackRecord)[] = [
+  "Date",
+  "Activity",
+  "Feedback Channel used",
+  "Feedback Category",
+  "Thematic Area",
+  "Project related to feedback",
+  "District",
+  "Subcounty",
+  "Village",
+  "Who is giving feedback?",
+  "Description of feedback, suggestion or complaint",
+  "Description of actions taken",
+  "Status of this feedback",
+  "Referral Status",
+];
+
+export function searchRecords(
+  records: FeedbackRecord[],
+  query: string
+): FeedbackRecord[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return records;
+  return records.filter((r) => {
+    const haystack = SEARCH_FIELDS
+      .map((k) => (r[k] == null ? "" : String(r[k])))
+      .join(" | ")
+      .toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
 export function applyFilters(
   records: FeedbackRecord[],
   filters: Filters
 ): FeedbackRecord[] {
   const search = filters.search.trim().toLowerCase();
-  const searchFields: (keyof FeedbackRecord)[] = [
-    "Date",
-    "Activity",
-    "Feedback Channel used",
-    "Feedback Category",
-    "Thematic Area",
-    "Project related to feedback",
-    "District",
-    "Subcounty",
-    "Village",
-    "Who is giving feedback?",
-    "Description of feedback, suggestion or complaint",
-    "Description of actions taken",
-    "Status of this feedback",
-    "Referral Status",
-  ];
 
   return records.filter((r) => {
     if (filters.project && r["Project related to feedback"] !== filters.project)
@@ -59,7 +78,7 @@ export function applyFilters(
     if (filters.endDate && r.Date && r.Date > filters.endDate) return false;
 
     if (search) {
-      const haystack = searchFields
+      const haystack = SEARCH_FIELDS
         .map((k) => (r[k] == null ? "" : String(r[k])))
         .join(" | ")
         .toLowerCase();

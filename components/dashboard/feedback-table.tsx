@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  Search,
+  X,
 } from "lucide-react";
 import {
   Table,
@@ -24,6 +26,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { searchRecords } from "@/lib/filters";
 import { cn } from "@/lib/utils";
 import type { FeedbackRecord } from "@/lib/types";
 
@@ -93,10 +97,24 @@ export function FeedbackTable({ records, onSelect }: FeedbackTableProps) {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(25);
+  const [localSearch, setLocalSearch] = useState("");
+
+  // Table-scoped quick filter: applies on TOP of the page-level filters that
+  // produced `records`, and is intentionally independent of the global
+  // FilterBar so it doesn't affect KPIs, charts, or the CSV export.
+  const tableRows = useMemo(
+    () => searchRecords(records, localSearch),
+    [records, localSearch]
+  );
+
+  // Reset to first page whenever the table-scoped search changes.
+  useEffect(() => {
+    setPage(0);
+  }, [localSearch]);
 
   const sortedRows = useMemo(() => {
     const col = COLUMNS.find((c) => c.key === sortKey);
-    if (!col) return records;
+    if (!col) return tableRows;
     const comparator = (a: FeedbackRecord, b: FeedbackRecord) => {
       const va = col.accessor(a);
       const vb = col.accessor(b);
@@ -110,8 +128,8 @@ export function FeedbackTable({ records, onSelect }: FeedbackTableProps) {
       const sb = String(vb);
       return sortDir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
     };
-    return [...records].sort(comparator);
-  }, [records, sortKey, sortDir]);
+    return [...tableRows].sort(comparator);
+  }, [tableRows, sortKey, sortDir]);
 
   const pageCount = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -132,12 +150,45 @@ export function FeedbackTable({ records, onSelect }: FeedbackTableProps) {
   return (
     <Card className="overflow-hidden">
       <CardHeader>
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <CardTitle>Feedback records</CardTitle>
-          <p className="text-xs text-cordaid-muted">
-            {sortedRows.length.toLocaleString()} records · showing {start.toLocaleString()}–
-            {end.toLocaleString()} · click any row for full details
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <CardTitle>Feedback records</CardTitle>
+            <p className="mt-1 text-xs text-cordaid-muted">
+              {sortedRows.length === tableRows.length ? (
+                <>
+                  {sortedRows.length.toLocaleString()} of {records.length.toLocaleString()}{" "}
+                  records · showing {start.toLocaleString()}–{end.toLocaleString()} · click any row for full details
+                </>
+              ) : (
+                <>
+                  {sortedRows.length.toLocaleString()} of {records.length.toLocaleString()}{" "}
+                  records ({tableRows.length.toLocaleString()} match the table search) ·
+                  showing {start.toLocaleString()}–{end.toLocaleString()}
+                </>
+              )}
+            </p>
+          </div>
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cordaid-muted" />
+            <Input
+              type="search"
+              placeholder="Quick filter rows…"
+              aria-label="Quick filter rows in the table"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              className="h-9 pl-9 pr-9"
+            />
+            {localSearch && (
+              <button
+                type="button"
+                onClick={() => setLocalSearch("")}
+                aria-label="Clear table search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-cordaid-muted transition-colors hover:bg-cordaid-cream hover:text-cordaid-dark focus:outline-none focus:ring-2 focus:ring-cordaid-red/40"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">
@@ -177,8 +228,37 @@ export function FeedbackTable({ records, onSelect }: FeedbackTableProps) {
             <TableBody>
               {pageRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={COLUMNS.length + 1} className="text-center text-cordaid-muted py-10">
-                    No feedback matches the current filters.
+                  <TableCell
+                    colSpan={COLUMNS.length + 1}
+                    className="px-6 py-10 text-center text-cordaid-muted"
+                  >
+                    {records.length === 0 ? (
+                      <span>
+                        No feedback matches the global filters. Adjust the filters above to widen the result set.
+                      </span>
+                    ) : localSearch ? (
+                      <span className="inline-flex flex-col items-center gap-2">
+                        <span>
+                          No rows match{" "}
+                          <span className="font-semibold text-cordaid-dark">
+                            “{localSearch}”
+                          </span>{" "}
+                          in the table.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setLocalSearch("")}
+                          className="inline-flex items-center gap-1 rounded-full border border-cordaid-border bg-white px-3 py-1 text-xs font-semibold text-cordaid-dark transition-colors hover:bg-cordaid-cream"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Clear table search
+                        </button>
+                      </span>
+                    ) : (
+                      <span>
+                        Sort or paginate to view more feedback rows.
+                      </span>
+                    )}
                   </TableCell>
                 </TableRow>
               )}
