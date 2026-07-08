@@ -37,6 +37,14 @@ export interface KoboFormMeta {
   integerLabels: Set<string>;
   /** Labels for questions typed as `date` (so we validate YYYY-MM-DD). */
   dateLabels: Set<string>;
+  /**
+   * Per-question slug → label lookup. Keys are Kobo `name` attributes, values
+   * are `{choice_slug: choice_label}` tables. Used during normalisation to
+   * rewrite select_one stored values (which Kobo persists as slugs like
+   * `kabale`) back to the human-readable labels that the dashboard's filters,
+   * KPIs, and chart axes already operate on.
+   */
+  valueNameToLabel: Record<string, Record<string, string>>;
 }
 
 export interface KoboFetchResult {
@@ -115,6 +123,7 @@ export async function fetchKoboFormMeta(
   const nameToLabel: Record<string, string> = {};
   const integerLabels = new Set<string>();
   const dateLabels = new Set<string>();
+  const valueNameToLabel: Record<string, Record<string, string>> = {};
 
   for (const q of Array.isArray(data?.content) ? data.content : []) {
     if (!q || typeof q !== "object") continue;
@@ -124,10 +133,26 @@ export async function fetchKoboFormMeta(
     if (!lbl) continue;
     nameToLabel[name] = lbl;
     const rawType = (q as Record<string, unknown>).type;
-    if (typeof rawType === "string") {
-      const t = rawType.split(" ", 1)[0]; // strip `select_one foo` to `select_one`
-      if (t === "integer") integerLabels.add(lbl);
-      else if (t === "date") dateLabels.add(lbl);
+    const t = typeof rawType === "string" ? rawType.split(" ", 1)[0] : ""; // strip `select_one foo` to `select_one`
+    if (t === "integer") integerLabels.add(lbl);
+    else if (t === "date") dateLabels.add(lbl);
+    // select_one / select_multiple questions also expose a `choices` array
+    // mapping slug → label. Capture each so the transformer can rewrite stored
+    // slugs back to the human-readable labels the dashboard already uses.
+    if (t === "select_one" || t === "select_multiple") {
+      const rawChoices = (q as Record<string, unknown>).choices;
+      if (Array.isArray(rawChoices)) {
+        const map: Record<string, string> = {};
+        for (const c of rawChoices) {
+          if (!c || typeof c !== "object") continue;
+          const cName = (c as Record<string, unknown>).name;
+          const cLabel = extractLabel((c as Record<string, unknown>).label);
+          if (typeof cName === "string" && cName && cLabel) {
+            map[cName] = cLabel;
+          }
+        }
+        if (Object.keys(map).length) valueNameToLabel[name] = map;
+      }
     }
   }
 
@@ -138,6 +163,7 @@ export async function fetchKoboFormMeta(
     nameToLabel,
     integerLabels,
     dateLabels,
+    valueNameToLabel,
   };
 }
 
@@ -145,15 +171,29 @@ function normalizeSubmission(
   raw: Record<string, unknown>,
   meta: KoboFormMeta
 ): FeedbackRecord {
-  // Step 1: copy and rename snake_case keys via the schema-derived map.
+  // Step 1: copy, rewrite select_one slug values to display labels, then
+  // rename snake_case keys via the schema-derived map. Doing value-translate
+  // BEFORE key-rename keeps the loop single-pass and matches the shape
+  // `data/feedback.json` already ships (label-keyed, label-valued), so
+  // filters / KPIs / charts work uniformly across the live and fallback
+  // paths.
   const mapped: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(raw)) {
     if (k === "meta" || k.startsWith("_")) {
       mapped[k] = v;
       continue;
     }
+    const valueMap = meta.valueNameToLabel[k];
+    let displayValue: unknown = v;
+    if (
+      valueMap &&
+      typeof v === "string" &&
+      Object.prototype.hasOwnProperty.call(valueMap, v)
+    ) {
+      displayValue = valueMap[v];
+    }
     const targetKey = meta.nameToLabel[k] ?? k;
-    mapped[targetKey] = v;
+    mapped[targetKey] = displayValue;
   }
 
   // Step 2: numeric coercion for every integer question in the form.

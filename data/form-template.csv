@@ -1,43 +1,365 @@
 survey
-type,name,label,required
-date,date,Date,FALSE
-text,activity,Activity,FALSE
-select_one feedback_channel,feedback_channel,Feedback Channel used,FALSE
-select_one feedback_category,feedback_category,Feedback Category,FALSE
-select_one yes_no,is_emergency,Emergency Feedback,FALSE
-select_one thematic_area,thematic_area,Thematic Area,FALSE
-text,project_code,Project related to feedback,FALSE
-text,district,District,FALSE
-text,subcounty,Subcounty,FALSE
-text,village,Village,FALSE
-text,respondent_name,Who is giving feedback?,FALSE
-select_one gender,gender,Gender,FALSE
-integer,age,Age,FALSE
-text,feedback_text,"Description of feedback, suggestion or complaint",FALSE
-text,actions_taken,Description of actions taken,FALSE
-text,referral_status,Referral Status,FALSE
-select_one feedback_status,feedback_status,Status of this feedback,FALSE
-date,date_resolved,Date feedback was resolved,FALSE
-integer,days_to_resolve,Days taken to resolved this feedback,FALSE
-select_one yes_no,reported_to_integrity,Reported to Integrity Focal Person,FALSE
-select_one yes_no,requires_urgent_response,Feedback requires urgent response,FALSE
-text,categorized_as,Feedback Categorized as,FALSE
+type,name,label,required,choice_filter,appearance
+date,date,Date,FALSE,,
+select_one activity,activity,Activity,FALSE,,minimal
+select_one feedback_channel,feedback_channel,Feedback Channel used,FALSE,,
+select_one feedback_category,feedback_category,Feedback Category,FALSE,,
+select_one yes_no,is_emergency,Emergency Feedback,FALSE,,
+select_one thematic_area,thematic_area,Thematic Area,FALSE,,
+select_one project_code,project_code,Project related to feedback,FALSE,,minimal
+select_one district,district,District,FALSE,,minimal
+select_one subcounty,subcounty,Subcounty,FALSE,district=${district},minimal
+select_one village,village,Village,FALSE,subcounty=${subcounty},minimal
+text,respondent_name,Who is giving feedback?,FALSE,,
+select_one gender,gender,Gender,FALSE,,
+integer,age,Age,FALSE,,
+text,feedback_text,"Description of feedback, suggestion or complaint",FALSE,,
+text,actions_taken,Description of actions taken,FALSE,,
+select_one referral_status,referral_status,Referral Status,FALSE,,
+select_one feedback_status,feedback_status,Status of this feedback,FALSE,,
+date,date_resolved,Date feedback was resolved,FALSE,,
+integer,days_to_resolve,Days taken to resolved this feedback,FALSE,,
+select_one yes_no,reported_to_integrity,Reported to Integrity Focal Person,FALSE,,
+select_one yes_no,requires_urgent_response,Feedback requires urgent response,FALSE,,
+text,categorized_as,Feedback Categorized as,FALSE,,
+
 choices
-list_name,name,label
-yes_no,yes,Yes
-yes_no,no,No
-gender,male,Male
-gender,female,Female
-feedback_status,new_feedback,New Feedback
-feedback_status,under_investigation,Old Feedback Under investigations
-feedback_status,resolved_closed,Resolved & Closed
-feedback_channel,face-to-face_feedback_form,Face-to-face/feedback Form
-feedback_channel,tollfree_hotline_and_sms,Tollfree Hotline & SMS
-feedback_category,feedback_or_suggestion,Feedback or Suggestion
-feedback_category,non-sensitive_complaint,Non-Sensitive Complaint
-feedback_category,request_for_assistance,Request for assistance
-thematic_area,health,Health
-thematic_area,sustainable_livelihoods,Sustainable Livelihoods
+list_name,name,label,district,subcounty
+yes_no,yes,Yes,,
+yes_no,no,No,,
+gender,male,Male,,
+gender,female,Female,,
+feedback_status,new_feedback,New Feedback,,
+feedback_status,under_investigation,Old Feedback Under investigations,,
+feedback_status,resolved_closed,Resolved & Closed,,
+feedback_channel,face-to-face_feedback_form,Face-to-face/feedback Form,,
+feedback_channel,tollfree_hotline_and_sms,Tollfree Hotline & SMS,,
+feedback_category,feedback_or_suggestion,Feedback or Suggestion,,
+feedback_category,non-sensitive_complaint,Non-Sensitive Complaint,,
+feedback_category,request_for_assistance,Request for assistance,,
+thematic_area,health,Health,,
+thematic_area,sustainable_livelihoods,Sustainable Livelihoods,,
+district,alebtong,Alebtong,,
+district,arua,Arua,,
+district,budaka,Budaka,,
+district,bududa,Bududa,,
+district,bugiri,Bugiri,,
+district,bukwo,Bukwo,,
+district,bulambuli,Bulambuli,,
+district,bunyangabu,Bunyangabu,,
+district,buyende,Buyende,,
+district,jinja,Jinja,,
+district,kabale,Kabale,,
+district,kabarole,Kabarole,,
+district,kalangala,Kalangala,,
+district,kamuli,Kamuli,,
+district,kamwenge,Kamwenge,,
+district,kisoro,Kisoro,,
+district,kween,Kween,,
+district,kyenjojo,Kyenjojo,,
+district,lira,Lira,,
+district,mayuge,Mayuge,,
+district,mbale,Mbale,,
+district,namayingo,Namayingo,,
+district,rubanda,Rubanda,,
+district,rukiga,Rukiga,,
+subcounty,aloi,Aloi,alebtong,
+subcounty,angetta,Angetta,alebtong,
+subcounty,alebtong_enr,Enr,alebtong,
+subcounty,arua_city,Arua City,arua,
+subcounty,budaka_tc,BUdaka TC,budaka,
+subcounty,kabuna,Kabuna,budaka,
+subcounty,kaderuna,Kaderuna,budaka,
+subcounty,naboa,Naboa,budaka,
+subcounty,bubyangu,Bubyangu,bududa,
+subcounty,bududa_bududa,Bududa,bududa,
+subcounty,bududa_tc,Bududa TC,bududa,
+subcounty,buwali,Buwali,bududa,
+subcounty,bududa_masira,Masira,bududa,
+subcounty,e_division,E-Division,bugiri,
+subcounty,amanang,Amanang,bukwo,
+subcounty,brim,Brim,bukwo,
+subcounty,bukwo,Bukwo,bukwo,
+subcounty,bukwo_tc,Bukwo Tc,bukwo,
+subcounty,chepkwasta,Chepkwasta,bukwo,
+subcounty,suam,Suam,bukwo,
+subcounty,bulambuli_bulambuli,Bulambuli,bulambuli,
+subcounty,lusha,Lusha,bulambuli,
+subcounty,bulambuli_masira,Masira,bulambuli,
+subcounty,bunyangabu_bunyangabu,Bunyangabu,bunyangabu,
+subcounty,bunyangabu_rubanda,Rubanda,bunyangabu,
+subcounty,rwimi,Rwimi,bunyangabu,
+subcounty,buyende_buyende,Buyende,buyende,
+subcounty,jinja_city,Jinja city,jinja,
+subcounty,northern_division,Northern Division,jinja,
+subcounty,albtong,Albtong,kabale,
+subcounty,alebtong,Alebtong,kabale,
+subcounty,kabale_bududa,Bududa,kabale,
+subcounty,buhara,Buhara,kabale,
+subcounty,bulamabuli,Bulamabuli,kabale,
+subcounty,kabale_bulambuli,Bulambuli,kabale,
+subcounty,kabale_bunyangabu,Bunyangabu,kabale,
+subcounty,butanda,Butanda,kabale,
+subcounty,kabale_buyende,Buyende,kabale,
+subcounty,jinja,Jinja,kabale,
+subcounty,kabale,Kabale,kabale,
+subcounty,kabale_district_head_quarter,Kabale district Head quarter,kabale,
+subcounty,kabale_district_head_quarters,Kabale District head quarters,kabale,
+subcounty,kabale_kabalore,Kabalore,kabale,
+subcounty,kaharo,Kaharo,kabale,
+subcounty,kahungye,Kahungye,kabale,
+subcounty,kamuganguzi,Kamuganguzi,kabale,
+subcounty,kamuli,Kamuli,kabale,
+subcounty,kapchorwa,Kapchorwa,kabale,
+subcounty,kyanamira,Kyanamira,kabale,
+subcounty,kabale_kyenjojo,Kyenjojo,kabale,
+subcounty,kyenjonjo,Kyenjonjo,kabale,
+subcounty,kabale_lira,Lira,kabale,
+subcounty,maziba,Maziba,kabale,
+subcounty,mbale,Mbale,kabale,
+subcounty,mbarara,Mbarara,kabale,
+subcounty,rubaya,Rubaya,kabale,
+subcounty,kabale_rukiga,Rukiga,kabale,
+subcounty,busoro,Busoro,kabarole,
+subcounty,harugongo,Harugongo,kabarole,
+subcounty,kabarole_kabalore,Kabalore,kabarole,
+subcounty,kabarole,Kabarole,kabarole,
+subcounty,kitumba,Kitumba,kabarole,
+subcounty,ktc,Ktc,kalangala,
+subcounty,wankole,Wankole,kamuli,
+subcounty,bigodi,Bigodi,kamwenge,
+subcounty,biguli,Biguli,kamwenge,
+subcounty,bihaga,Bihaga,kamwenge,
+subcounty,bihanga,Bihanga,kamwenge,
+subcounty,bwizi,Bwizi,kamwenge,
+subcounty,kabambiro,Kabambiro,kamwenge,
+subcounty,kahunge,Kahunge,kamwenge,
+subcounty,kamenge,Kamenge,kamwenge,
+subcounty,kamweneg,Kamweneg,kamwenge,
+subcounty,kamwenge,Kamwenge,kamwenge,
+subcounty,nkoma,Nkoma,kamwenge,
+subcounty,bukimbiri,Bukimbiri,kisoro,
+subcounty,busanza,Busanza,kisoro,
+subcounty,kanaba,Kanaba,kisoro,
+subcounty,kirundo,Kirundo,kisoro,
+subcounty,kisoro,Kisoro,kisoro,
+subcounty,nyakabande,Nyakabande,kisoro,
+subcounty,chepsukunya,Chepsukunya,kween,
+subcounty,kapkwata,Kapkwata,kween,
+subcounty,kapronon_tc,Kapronon Tc,kween,
+subcounty,bufunjo,Bufunjo,kyenjojo,
+subcounty,katooke,Katooke,kyenjojo,
+subcounty,kihuura,Kihuura,kyenjojo,
+subcounty,kisojo,Kisojo,kyenjojo,
+subcounty,kyenjojo_kyenjojo,Kyenjojo,kyenjojo,
+subcounty,nyankwanzi,Nyankwanzi,kyenjojo,
+subcounty,kyenjojo_rubanda,Rubanda,kyenjojo,
+subcounty,agweng,Agweng,lira,
+subcounty,lira_dpm,Dpm,lira,
+subcounty,lira_lira,Lira,lira,
+subcounty,ogur,Ogur,lira,
+subcounty,bukatube,BUkatube,mayuge,
+subcounty,admin,Admin,mbale,
+subcounty,admin_finance,Admin - Finance,mbale,
+subcounty,buseba,Buseba,mbale,
+subcounty,mbale_dpm,Dpm,mbale,
+subcounty,mbale_enr,Enr,mbale,
+subcounty,namayingo_town_council,Namayingo Town Council,namayingo,
+subcounty,bubare,Bubare,rubanda,
+subcounty,bufundi,Bufundi,rubanda,
+subcounty,district_head_quarters,District head quarters,rubanda,
+subcounty,ikumba,Ikumba,rubanda,
+subcounty,muko,Muko,rubanda,
+subcounty,nyakabungo,Nyakabungo,rubanda,
+subcounty,rubanda_rubanda,Rubanda,rubanda,
+subcounty,rubanda_district_head_quarters,Rubanda district head quarters,rubanda,
+subcounty,ruhija,Ruhija,rubanda,
+subcounty,runada,Runada,rubanda,
+subcounty,kamwezi,Kamwezi,rukiga,
+subcounty,mparo,Mparo,rukiga,
+subcounty,rukiga_rukiga,Rukiga,rukiga,
+village,amiabil,Amiabil,,agweng
+village,corner_lwala,Corner Lwala,,agweng
+village,albtong_alebtong,Alebtong,,albtong
+village,alebtong_alebtong,Alebtong,,alebtong
+village,tangala,Tangala,,aloi
+village,koti,Koti,,amanang
+village,lagam,Lagam,,amanang
+village,anyeroangwa,Anyeroangwa,,angetta
+village,aputi,Aputi,,angetta
+village,telela,Telela,,angetta
+village,arua_city,Arua city,,arua_city
+village,nyabubale,Nyabubale,,bigodi
+village,biguli,Biguli,,biguli
+village,bihaga_bihanga,Bihanga,,bihaga
+village,bihanga_bihanga,Bihanga,,bihanga
+village,brim,Brim,,brim
+village,kamakunga,Kamakunga,,brim
+village,mokoywet,Mokoywet,,brim
+village,bubare,Bubare,,bubare
+village,bubyangu_lower,Bubyangu Lower,,bubyangu
+village,naigobya,Naigobya,,budaka_tc
+village,bududa_bududa,Bududa,,bududa
+village,bunamubi,Bunamubi,,bududa
+village,bududa_tc_bududa,Bududa,,bududa_tc
+village,bufundi,Bufundi,,bufundi
+village,rwenjoza,Rwenjoza,,bufunjo
+village,buhara,Buhara,,buhara
+village,buyemba,Buyemba,,bukatube
+village,bukimbiri,Bukimbiri,,bukimbiri
+village,kapkreson,Kapkreson,,bukwo
+village,esso,Esso,,bukwo_tc
+village,bulamabuli_bulambuli,Bulambuli,,bulamabuli
+village,bulambuli_bulambuli,Bulambuli,,bulambuli
+village,lusha,Lusha,,bulambuli
+village,bunyangabu,Bunyangabu,,bunyangabu
+village,buraza,Buraza,,busanza
+village,busanza,Busanza,,busanza
+village,lurangoli,Lurangoli,,buseba
+village,busoro_sk,Busoro SK,,busoro
+village,butanda,Butanda,,butanda
+village,bunamwamba,Bunamwamba,,buwali
+village,buwali,Buwali,,buwali
+village,buyende,Buyende,,buyende
+village,buyende_tc,Buyende TC,,buyende
+village,bwizi,Bwizi,,bwizi
+village,centre,Centre,,chepkwasta
+village,kapta,Kapta,,chepkwasta
+village,ngari,Ngari,,chepsukunya
+village,district_head_quarters,District head quarters,,district_head_quarters
+village,mukuba,Mukuba,,e_division
+village,harugongo,Harugongo,,harugongo
+village,ikumba,Ikumba,,ikumba
+village,ntaraga,Ntaraga,,ikumba
+village,jinja,Jinja,,jinja
+village,nile_hall,Nile hall,,jinja_city
+village,kabale,Kabale,,kabale
+village,kabale_district_head_quarter,Kabale district Head quarter,,kabale_district_head_quarter
+village,kabale_district_head_quarters_pas,Kabale District head quarters (PAS),,kabale_district_head_quarters
+village,kabalore_kabalore,Kabalore,,kabalore
+village,kabambiro,Kabambiro,,kabambiro
+village,kabarole_kabalore,Kabalore,,kabarole
+village,kabarole,Kabarole,,kabarole
+village,kotiya,Kotiya,,kabuna
+village,bunyolo,Bunyolo,,kaderuna
+village,kaperi,Kaperi,,kaderuna
+village,kiryolo,Kiryolo,,kaderuna
+village,kariba,Kariba,,kaharo
+village,mpanga,Mpanga,,kahunge
+village,kahungye,Kahungye,,kahungye
+village,kamenge_kamwenge,Kamwenge,,kamenge
+village,kankarara,Kankarara,,kamenge
+village,rwamamu,Rwamamu,,kamuganguzi
+village,kamuli,Kamuli,,kamuli
+village,kamweneg_kamwenge,Kamwenge,,kamweneg
+village,kamwenge_kamwenge,Kamwenge,,kamwenge
+village,nsorora,Nsorora,,kamwenge
+village,kamwezi,Kamwezi,,kamwezi
+village,kanaba,Kanaba,,kanaba
+village,kapchorwa,Kapchorwa,,kapchorwa
+village,karorwo,Karorwo,,kapkwata
+village,kapronon,Kapronon,,kapronon_tc
+village,katooke,Katooke,,katooke
+village,kihuura,Kihuura,,kihuura
+village,kirundo,Kirundo,,kirundo
+village,kisojo,Kisojo,,kisojo
+village,kosojo,Kosojo,,kisojo
+village,busanba,Busanba,,kisoro
+village,district_headquarters,District Headquarters,,kisoro
+village,kitumba,Kitumba,,kitumba
+village,kalangala,Kalangala,,ktc
+village,kyanamira,Kyanamira,,kyanamira
+village,kyenjojo_kyenjojo,Kyenjojo,,kyenjojo
+village,rwentale,Rwentale,,kyenjojo
+village,kyenjonjo_kyenjojo,Kyenjojo,,kyenjonjo
+village,lira,Lira,,lira
+village,kisubi,Kisubi,,lusha
+village,kisubi_a,Kisubi A,,lusha
+village,kisubi_b,Kisubi B,,lusha
+village,budua_tc,Budua TC,,masira
+village,bunabikwatu_a,Bunabikwatu A,,masira
+village,bunakhayenze,Bunakhayenze,,masira
+village,dunga,Dunga,,masira
+village,kiberema_a,Kiberema A,,masira
+village,kikobero,Kikobero,,masira
+village,kikobero_a,Kikobero A,,masira
+village,kimwemwe,Kimwemwe,,masira
+village,suume,Suume,,masira
+village,birambo,Birambo,,maziba
+village,kahama,Kahama,,maziba
+village,maziba,Maziba,,maziba
+village,mbale,Mbale,,mbale
+village,mbarara,Mbarara,,mbarara
+village,kiyogo,Kiyogo,,mparo
+village,mparo_mparo,Mparo,,mparo
+village,muko,Muko,,muko
+village,murukoro,Murukoro,,muko
+village,district_boardroom,District boardroom,,na
+village,enr_office,ENR office,,na
+village,naboa,Naboa,,naboa
+village,nekuku,Nekuku,,namayingo_town_council
+village,nkoma,Nkoma,,nkoma
+village,namulesa,Namulesa,,northern_division
+village,nyakabande,Nyakabande,,nyakabande
+village,murole,Murole,,nyakabungo
+village,nyankwanzi,Nyankwanzi,,nyankwanzi
+village,rubanda_mparo,Mparo,,rubanda
+village,murola,Murola,,rubanda
+village,rubanda_rubanda,Rubanda,,rubanda
+village,rubanda_district_head_quarters,Rubanda district head quarters,,rubanda_district_head_quarters
+village,kabirago,Kabirago,,rubaya
+village,kibuga,Kibuga,,rubaya
+village,ruhija,Ruhija,,ruhija
+village,rukiga,Rukiga,,rukiga
+village,runada_rubanda,Rubanda,,runada
+village,rwimi,Rwimi,,rwimi
+village,chepkusawar,Chepkusawar,,suam
+village,koibei,Koibei,,suam
+village,kongasis,Kongasis,,suam
+village,rikwo,Rikwo,,suam
+village,bubaale,Bubaale,,wankole
+village,bukutira_west,Bukutira west,,wankole
+village,busike_b,Busike B,,wankole
+activity,cbo_training,CBO training,,
+activity,cco_activities_monitoring,CCO activities monitoring,,
+activity,client_assessment,Client assessment,,
+activity,district_steering_committee_monitoring,District Steering Committee monitoring,,
+activity,ekn_partners_meeting,EKN partners meeting,,
+activity,enr_meeting_with_cordaid,ENR Meeting with cordaid,,
+activity,field_monitoring,Field Monitoring,,
+activity,field_monitoring_visit,Field Monitoring visit,,
+activity,field_monitoring_vist,Field Monitoring vist,,
+activity,indicator_validation,Indicator validation,,
+activity,indicator_validation_meeting,Indicator validation meeting,,
+activity,invoice_validation,Invoice validation,,
+activity,joint_monitoring,Joint monitoring,,
+activity,monitoirng,Monitoirng,,
+activity,monitoring,Monitoring,,
+activity,monitoring_visist,Monitoring visist,,
+activity,monitoring_visit,Monitoring visit,,
+activity,monitoring_visits,Monitoring visits,,
+activity,monitring,Monitring,,
+activity,office_walk_in,Office Walk In,,
+activity,peer_educators_training,Peer Educators Training,,
+activity,peer_training,Peer Training,,
+activity,private_sector_actor_review_meeting,Private sector actor review meeting,,
+activity,private_sector_actors_meeting,Private sector actors meeting,,
+activity,profiling_of_youth_data_entry,"Profiling of youth, data entry",,
+activity,rbf_refresher_taining,RBF refresher taining,,
+activity,rbf_refresher_tarining,RBF refresher tarining,,
+activity,rbf_refresher_training,RBF refresher training,,
+activity,refresher_training_on_rbf,Refresher training on RBF,,
+activity,technical_verification,Technical Verification,,
+activity,training_of_cbos,Training of CBOs,,
+activity,walk_in_request,Walk In Request,,
+project_code,pc_200856_heroes,200856: HEROES,,
+project_code,pc_201276_a_grip,201276: A-GRIP,,
+project_code,pc_201386_wework,201386: WeWork,,
+project_code,pc_201405_wework_west_nile,201405: WeWork-West Nile,,
+referral_status,not_referred,Not Referred,,
+referral_status,referred_externally,Referred externally,,
+referral_status,referred_internally,Referred internally,,
+
 settings
 form_title,form_id,version
-Cordaid Feedback Dashboard Test,cordaid_feedback_dashboard_test,20250707
+Cordaid Feedback Dashboard Test,cordaid_feedback_dashboard_test,20250708
