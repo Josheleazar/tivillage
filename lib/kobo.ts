@@ -124,8 +124,50 @@ export async function fetchKoboFormMeta(
   const integerLabels = new Set<string>();
   const dateLabels = new Set<string>();
   const valueNameToLabel: Record<string, Record<string, string>> = {};
+  const byListName: Record<string, Record<string, string>> = {};
 
-  for (const q of Array.isArray(data?.content) ? data.content : []) {
+  // KPI v2 puts the XLSForm survey and choices sheets under
+  // `data.content.survey` and `data.content.choices` as arrays of row
+  // objects; some deployments expose them as top-level `data.survey` /
+  // `data.choices` instead. Honour both shapes so the transformer survives
+  // deployment-version drift. (Earlier revisions of this code walked
+  // `data.content` directly, but it's actually a DICT whose values are the
+  // sheet arrays, not a flat list of question objects — that's why label
+  // lookups were silently empty and every record came back null.)
+  const content =
+    data && typeof data === "object"
+      ? ((data as Record<string, unknown>).content as
+          | Record<string, unknown>
+          | null)
+      : null;
+  const surveyList: Array<Record<string, unknown>> = Array.isArray(content?.survey)
+    ? (content!.survey as Array<Record<string, unknown>>)
+    : Array.isArray(data?.survey)
+    ? (data.survey as Array<Record<string, unknown>>)
+    : [];
+  const choicesList: Array<Record<string, unknown>> = Array.isArray(content?.choices)
+    ? (content!.choices as Array<Record<string, unknown>>)
+    : Array.isArray(data?.choices)
+    ? (data.choices as Array<Record<string, unknown>>)
+    : [];
+
+  // Pass 1: walk the choices sheet to build a per-list_name slug→label map.
+  // `list_name` ties each choice row to a question's `type` suffix — e.g.
+  // a survey row of `type: select_one district` corresponds to choices with
+  // `list_name: 'district'`.
+  for (const c of choicesList) {
+    if (!c || typeof c !== "object") continue;
+    const listName = (c as Record<string, unknown>).list_name;
+    const slug = (c as Record<string, unknown>).name;
+    const cLabel = extractLabel((c as Record<string, unknown>).label);
+    if (typeof listName !== "string" || !listName) continue;
+    if (typeof slug !== "string" || !slug || !cLabel) continue;
+    (byListName[listName] ??= {})[slug] = cLabel;
+  }
+
+  // Pass 2: walk the survey sheet to build name→label plus integer/date
+  // tags, then wire each select_* question to the value-map we just built.
+  for (const q of surveyList) {
     if (!q || typeof q !== "object") continue;
     const name = (q as Record<string, unknown>).name;
     if (typeof name !== "string" || !name) continue;
@@ -134,24 +176,34 @@ export async function fetchKoboFormMeta(
     nameToLabel[name] = lbl;
     const rawType = (q as Record<string, unknown>).type;
     const t = typeof rawType === "string" ? rawType.split(" ", 1)[0] : ""; // strip `select_one foo` to `select_one`
+    const after =
+      typeof rawType === "string" ? rawType.slice(t.length).trim() : "";
     if (t === "integer") integerLabels.add(lbl);
     else if (t === "date") dateLabels.add(lbl);
-    // select_one / select_multiple questions also expose a `choices` array
-    // mapping slug → label. Capture each so the transformer can rewrite stored
-    // slugs back to the human-readable labels the dashboard already uses.
+    // select_one / select_multiple: the value-map comes from the choices
+    // sheet via `list_name` matching the question type suffix. Some
+    // deployments also inline `q.choices` per question — honour it as a
+    // secondary source if the choices sheet didn't provide one.
     if (t === "select_one" || t === "select_multiple") {
-      const rawChoices = (q as Record<string, unknown>).choices;
-      if (Array.isArray(rawChoices)) {
-        const map: Record<string, string> = {};
-        for (const c of rawChoices) {
-          if (!c || typeof c !== "object") continue;
-          const cName = (c as Record<string, unknown>).name;
-          const cLabel = extractLabel((c as Record<string, unknown>).label);
-          if (typeof cName === "string" && cName && cLabel) {
-            map[cName] = cLabel;
+      if (after) {
+        const map = byListName[after];
+        if (map && Object.keys(map).length) valueNameToLabel[name] = map;
+      }
+      if (!valueNameToLabel[name]) {
+        const inline = (q as Record<string, unknown>).choices;
+        if (Array.isArray(inline)) {
+          const inlineMap: Record<string, string> = {};
+          for (const c of inline) {
+            if (!c || typeof c !== "object") continue;
+            const cName = (c as Record<string, unknown>).name;
+            const cLabel = extractLabel((c as Record<string, unknown>).label);
+            if (typeof cName === "string" && cName && cLabel) {
+              inlineMap[cName] = cLabel;
+            }
           }
+          if (Object.keys(inlineMap).length)
+            valueNameToLabel[name] = inlineMap;
         }
-        if (Object.keys(map).length) valueNameToLabel[name] = map;
       }
     }
   }
