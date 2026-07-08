@@ -212,10 +212,18 @@ export async function fetchKoboFormMeta(
     // deployments also inline `q.choices` per question — honour it as a
     // secondary source if the choices sheet didn't provide one.
     if (t === "select_one" || t === "select_multiple") {
-      if (after) {
-        const map = byListName[after];
-        if (map && Object.keys(map).length) valueNameToLabel[name] = map;
-      }
+      // Primary cross-reference: KPI v2 groups choices by `list_name`
+      // whose value most forms keep in sync with the survey row's `name`
+      // (e.g. survey `name: gender` ↔ choices with `list_name: gender`).
+      // The modal KPI v2 response strips the `select_one <listname>`
+      // suffix from `type`, so `after` is unreliable — using the survey
+      // row's `name` is the authoritative way to find the valueMap.
+      // Fall back to `after` for forms that still preserve the suffix
+      // (older deployments, including the one this code was originally
+      // written against).
+      let map = byListName[name];
+      if (!map && after) map = byListName[after];
+      if (map && Object.keys(map).length) valueNameToLabel[name] = map;
       if (!valueNameToLabel[name]) {
         const inline = (q as Record<string, unknown>).choices;
         if (Array.isArray(inline)) {
@@ -290,10 +298,28 @@ function normalizeSubmission(
   }
 
   // Step 4: defensive typed construction. All 24 keys are guaranteed.
-  const yesNo = (v: unknown): "Yes" | "No" | null =>
-    v === "Yes" || v === "No" ? (v as "Yes" | "No") : null;
-  const maleFemale = (v: unknown): "Male" | "Female" | null =>
-    v === "Male" || v === "Female" ? (v as "Male" | "Female") : null;
+  // Beyond the literal "Yes"/"No" / "Male"/"Female" labels that the
+  // valueMap translation produces, Kobo sometimes persists the
+  // operator-typed value verbatim BEFORE the valueMap lookup fires —
+  // e.g. if the survey row's `list_name` differs from its `name` (the
+  // `is_emergency`, `reported_to_integrity`, `requires_urgent_response`
+  // rows all point at `list_name: yes_no`), or for any select_* whose
+  // valueMap wasn't captured. Accept the bare-slug forms below so the
+  // simplest bug class doesn't propagate as nulls — without this, the
+  // Gender chart shows zero bars even when raw submissions have
+  // `gender: "male"` and the KPI's "Female" tile stays at 0.
+  const yesNo = (v: unknown): "Yes" | "No" | null => {
+    if (v === "Yes" || v === "No") return v as "Yes" | "No";
+    if (v === "yes" || v === "Y") return "Yes";
+    if (v === "no" || v === "N") return "No";
+    return null;
+  };
+  const maleFemale = (v: unknown): "Male" | "Female" | null => {
+    if (v === "Male" || v === "Female") return v as "Male" | "Female";
+    if (v === "male" || v === "M" || v === "m") return "Male";
+    if (v === "female" || v === "F" || v === "f") return "Female";
+    return null;
+  };
 
   return {
     Date: strOf(mapped.Date),
