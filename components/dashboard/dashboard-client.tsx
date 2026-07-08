@@ -186,9 +186,15 @@ export function DashboardClient() {
         />
 
         <footer className="text-xs text-cordaid-muted pt-2">
-          Phase&nbsp;1 modern rebuild — Next.js · Tailwind · shadcn-style UI ·
-          ECharts · sortable &amp; paginated table · row drawer. Phase&nbsp;2
-          (URL-synced filters, dark mode, server-side aggregations) to follow.
+          Built by{" "}
+          <a
+            href="https://josheleazar.vercel.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 hover:text-cordaid-dark transition-colors"
+          >
+            Josheleazar
+          </a>
         </footer>
       </main>
 
