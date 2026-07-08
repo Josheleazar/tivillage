@@ -85,10 +85,37 @@ async function authedFetch(
 }
 
 /**
- * KPI v2 `label` may be a plain string or a localised dictionary.
- * Deterministic English first; never pick an arbitrary fallback.
+ * KPI v2 emits `label` in three shapes depending on form-translation
+ * configuration:
+ *   1. a plain string (older API responses, single-language forms)
+ *   2. an array of strings, where `label[0]` is the default language
+ *      (THE modal shape on current kf.kobotoolbox.org deployments)
+ *   3. a {language: string} dictionary on forms with multiple translations
+ *
+ * Handle all three. The array shape MUST be detected before the object
+ * branch because `typeof === 'object'` returns true for arrays — if we
+ * fell through to the dict branch we'd dereference `label["English (en)"]`
+ * on an array, get `undefined`, and silently emit an empty label, which
+ * then short-circuits `nameToLabel` (every question was being skipped in
+ * the previous fix because `extractLabel` returned "" for every label).
  */
 function extractLabel(label: unknown): string {
+  // Array shape: walk to the first non-empty string. Defensive against
+  // mixed-type arrays ([0] could in theory be a localised dict placeholder).
+  if (Array.isArray(label)) {
+    for (const entry of label) {
+      if (typeof entry === "string" && entry) return entry;
+      if (entry && typeof entry === "object") {
+        const dict = entry as Record<string, string>;
+        if (typeof dict["English (en)"] === "string" && dict["English (en)"]) {
+          return dict["English (en)"];
+        }
+        if (typeof dict.English === "string" && dict.English) return dict.English;
+        if (typeof dict.en === "string" && dict.en) return dict.en;
+      }
+    }
+    return "";
+  }
   if (typeof label === "string" && label) return label;
   if (label && typeof label === "object") {
     const dict = label as Record<string, string>;
