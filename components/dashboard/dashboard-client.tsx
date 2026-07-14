@@ -11,7 +11,7 @@ import { KpiCards } from "@/components/dashboard/kpi-cards";
 import { applyFilters, computeKpis, downloadCsv, toCsv } from "@/lib/filters";
 import type { ApiMeta, DynamicRecord, FeedbackRecord, Filters } from "@/lib/types";
 import { AlertTriangle, Loader2 } from "lucide-react";
-import { getForm } from "@/lib/dashboards";
+import { getForm, listForms } from "@/lib/dashboards";
 
 const DATE_BOUNDS_KEY = "cordaid-date-bounds";
 
@@ -63,6 +63,12 @@ export function DashboardClient() {
   // dashboard layout.
   const form = getForm(searchParams.get("form"));
   const formKey = form.id;
+  // Memoize the registry walk so the `forms` array reference stays
+  // stable across renders — without this, FormPicker's effect re-runs
+  // on every parent render (listForms() returns Object.values(registry),
+  // a fresh array each call). The registry itself is module-scoped, so
+  // empty deps are safe.
+  const forms = useMemo(() => listForms(), []);
 
   const [records, setRecords] = useState<DynamicRecord[]>([]);
   const [meta, setMeta] = useState<ApiMeta | null>(null);
@@ -214,7 +220,13 @@ export function DashboardClient() {
 
   return (
     <>
-      <DashboardHeader records={records} meta={meta} form={form} />
+      <DashboardHeader
+        records={records}
+        meta={meta}
+        form={form}
+        forms={forms}
+        onSwitchForm={switchForm}
+      />
       <main className="container py-6 space-y-6">
         <FilterBar
           filters={filters}

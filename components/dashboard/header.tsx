@@ -1,6 +1,7 @@
 import { Activity, Database } from "lucide-react";
 import type { ApiMeta, DynamicRecord, FormConfig } from "@/lib/types";
 import { SourceChip } from "./source-chip";
+import { FormPicker } from "./form-picker";
 
 interface HeaderProps {
   records: DynamicRecord[];
@@ -11,9 +12,23 @@ interface HeaderProps {
   // header would hard-code `r.Date` for every form, leaving
   // WeWork's Period section blank.
   form: FormConfig;
+  // All forms avail. for selection (Step 6's form picker). The picker
+  // renders one menu item per entry; the dashboard parent owns the
+  // router navigation (switchForm via ?form=).
+  forms: FormConfig[];
+  // Parent's switchForm callback. Invoked when the user picks a
+  // different form in the picker; the parent strips all filter params
+  // and re-issues the fetch.
+  onSwitchForm: (formId: string) => void;
 }
 
-export function DashboardHeader({ records, meta, form }: HeaderProps) {
+export function DashboardHeader({
+  records,
+  meta,
+  form,
+  forms,
+  onSwitchForm,
+}: HeaderProps) {
   const dates = records
     .map((r) => r[form.dateColumn])
     .filter((d): d is string => typeof d === "string" && !!d)
@@ -43,6 +58,11 @@ export function DashboardHeader({ records, meta, form }: HeaderProps) {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <FormPicker
+              forms={forms}
+              current={form}
+              onSelect={onSwitchForm}
+            />
             <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold backdrop-blur-sm">
               <Database className="h-4 w-4" />
               <span>
