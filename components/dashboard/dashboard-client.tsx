@@ -9,7 +9,7 @@ import { FeedbackTable } from "@/components/dashboard/feedback-table";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { KpiCards } from "@/components/dashboard/kpi-cards";
 import { applyFilters, computeKpis, downloadCsv, toCsv } from "@/lib/filters";
-import type { ApiMeta, DynamicRecord, Filters } from "@/lib/types";
+import type { ApiMeta, DynamicRecord, FeedbackRecord, Filters } from "@/lib/types";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { getForm } from "@/lib/dashboards";
 
@@ -132,12 +132,27 @@ export function DashboardClient() {
     };
   }, [formKey, form.dateColumn]);
 
+  // TODAY bridge: lib/filters.ts + downstream components still consume
+  // FeedbackRecord[] (Step 7 re-ports them to FormConfig + DynamicRecord).
+  // These `as unknown as FeedbackRecord[]` casts allow the existing
+  // helpers to compile against the open-dict DynamicRecord[] that
+  // lib/kobo.ts now emits. They are expected-runtime-safe because every
+  // Cordaid record resolves to the same PascalCase-shape JSON it did
+  // pre-refactor (verified at runtime in Step 13's no-regression check);
+  // WeWork routes through the same bridge while Step 7 reformats the
+  // helper + consumer set to consume DynamicRecord[] directly.
   const filtered = useMemo(() => {
-    if (!filters) return [] as DynamicRecord[];
-    return applyFilters(records, filters);
+    if (!filters) return [] as unknown as FeedbackRecord[];
+    return applyFilters(
+      records as unknown as FeedbackRecord[],
+      filters,
+    );
   }, [records, filters]);
 
-  const kpis = useMemo(() => computeKpis(filtered), [filtered]);
+  const kpis = useMemo(
+    () => computeKpis(filtered as unknown as FeedbackRecord[]),
+    [filtered],
+  );
 
   function updateFilters(partial: Partial<Filters>) {
     setFilters((prev) => (prev ? { ...prev, ...partial } : prev));
@@ -152,7 +167,10 @@ export function DashboardClient() {
   function exportCsv() {
     if (!filtered.length) return;
     const date = new Date().toISOString().slice(0, 10);
-    downloadCsv(`${formKey}-feedback-${date}.csv`, toCsv(filtered));
+    downloadCsv(
+      `${formKey}-feedback-${date}.csv`,
+      toCsv(filtered as unknown as FeedbackRecord[]),
+    );
   }
 
   // switchForm strips ALL filter params on the URL per F5b — every
@@ -200,7 +218,7 @@ export function DashboardClient() {
       <main className="container py-6 space-y-6">
         <FilterBar
           filters={filters}
-          records={records}
+          records={records as unknown as FeedbackRecord[]}
           onChange={updateFilters}
           onReset={resetFilters}
           onExport={exportCsv}
@@ -211,9 +229,9 @@ export function DashboardClient() {
         <Charts records={filtered} />
 
         <FeedbackTable
-          records={filtered}
+          records={filtered as unknown as FeedbackRecord[]}
           onSelect={(record) => {
-            setSelected(record);
+            setSelected(record as unknown as DynamicRecord);
             setOpen(true);
           }}
         />
@@ -232,7 +250,7 @@ export function DashboardClient() {
       </main>
 
       <DetailDrawer
-        record={selected}
+        record={selected as unknown as FeedbackRecord | null}
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
