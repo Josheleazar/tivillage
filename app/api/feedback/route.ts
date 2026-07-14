@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
-import type { ApiMeta, FeedbackRecord } from "@/lib/types";
+import type { ApiMeta, DynamicRecord } from "@/lib/types";
 import {
   fetchKoboSubmissions,
   type KoboConfig,
@@ -29,10 +29,10 @@ const FALLBACK_CACHE_HEADERS = {
     "public, max-age=5, s-maxage=5, stale-while-revalidate=15",
 };
 
-async function readLocalJson(): Promise<FeedbackRecord[]> {
+async function readLocalJson(): Promise<DynamicRecord[]> {
   const filePath = path.join(process.cwd(), "data", "feedback.json");
   const raw = await fs.readFile(filePath, "utf8");
-  return JSON.parse(raw) as FeedbackRecord[];
+  return JSON.parse(raw) as DynamicRecord[];
 }
 
 export async function GET() {

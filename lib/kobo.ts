@@ -15,7 +15,7 @@
 //   - all upstream fetches bypass Next's data cache (`cache: "no-store"`)
 //     so the route's own revalidate controls freshness.
 
-import type { FeedbackRecord } from "./types";
+import type { Cell, DynamicRecord } from "./types";
 
 export interface KoboConfig {
   token: string;
@@ -51,7 +51,7 @@ export interface KoboFetchResult {
   uid: string;
   name: string;
   version: string | undefined;
-  records: FeedbackRecord[];
+  records: DynamicRecord[];
   fetchedAt: string;
   truncated: boolean;
   totalCount: number | null;
@@ -137,6 +137,23 @@ function numOf(v: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+// Type guard: `Cell = string | number | null`. Used by
+// normalizeSubmission's final-pass filter (Step 5) to strip non-Cell
+// Kobo metadata fields — `_geolocation` (a `{type, coordinates}` dict),
+// `_attachments` (a list-of-dicts), `_validation_status` (a dict),
+// `_notes` (a string-list), `_tags` (a dict-list) and friends that the
+// pre-Step-3 strict 24-field projection silently dropped. Without this
+// filter the open-dict DynamicRecord cast would let them through and
+// the dashboard's detail-drawer auto-discovery (Step 12) would render
+// "[object Object]" on them. Restoring today's silent-drop posture
+// explicitly here keeps Step 3 a strict non-regression for Cordaid.
+function isCell(v: unknown): v is Cell {
+  if (v === null) return true;
+  if (typeof v === "string") return true;
+  if (typeof v === "number") return Number.isFinite(v);
+  return false;
 }
 
 export async function fetchKoboFormMeta(
@@ -257,7 +274,7 @@ export async function fetchKoboFormMeta(
 function normalizeSubmission(
   raw: Record<string, unknown>,
   meta: KoboFormMeta
-): FeedbackRecord {
+): DynamicRecord {
   // Step 1: copy, rewrite select_one slug values to display labels, then
   // rename snake_case keys via the schema-derived map. Doing value-translate
   // BEFORE key-rename keeps the loop single-pass and matches the shape
@@ -297,17 +314,27 @@ function normalizeSubmission(
     }
   }
 
-  // Step 4: defensive typed construction. All 24 keys are guaranteed.
+  // Step 4 (refactored): in-place dynamic-record stamp.
+  //
+  // The strict PascalCase projection above is replaced by an in-place
+  // mutation of `mapped`. Every label-keyed field Kobo returned stays
+  // in `mapped` under its label name (Steps 1–3 above have already
+  // done the snake_case→label rename, valueMap translation, integer
+  // coercion, and date-shape validation). The 3 metadata fields get
+  // tightened to DynamicRecord's contract (`_id: number`,
+  // `_uuid: string`, `_submission_time: string | null`).
+  //
   // Beyond the literal "Yes"/"No" / "Male"/"Female" labels that the
   // valueMap translation produces, Kobo sometimes persists the
   // operator-typed value verbatim BEFORE the valueMap lookup fires —
-  // e.g. if the survey row's `list_name` differs from its `name` (the
-  // `is_emergency`, `reported_to_integrity`, `requires_urgent_response`
-  // rows all point at `list_name: yes_no`), or for any select_* whose
-  // valueMap wasn't captured. Accept the bare-slug forms below so the
-  // simplest bug class doesn't propagate as nulls — without this, the
-  // Gender chart shows zero bars even when raw submissions have
-  // `gender: "male"` and the KPI's "Female" tile stays at 0.
+  // e.g. if the survey row's `list_name` differs from its `name`
+  // (the `is_emergency`, `reported_to_integrity`,
+  // `requires_urgent_response` rows all point at `list_name: yes_no`),
+  // or for any select_* whose valueMap wasn't captured. Accept the
+  // bare-slug forms below so the simplest bug class doesn't propagate
+  // as nulls — without this, the Gender chart shows zero bars even
+  // when raw submissions have `gender: "male"` (the prior Bug C fix
+  // preserved this defensive layer; Step 3 keeps it).
   const yesNo = (v: unknown): "Yes" | "No" | null => {
     if (v === "Yes" || v === "No") return v as "Yes" | "No";
     if (v === "yes" || v === "Y") return "Yes";
@@ -321,41 +348,25 @@ function normalizeSubmission(
     return null;
   };
 
-  return {
-    Date: strOf(mapped.Date),
-    Activity: strOf(mapped.Activity),
-    "Feedback Channel used": strOf(mapped["Feedback Channel used"]),
-    "Feedback Category": strOf(mapped["Feedback Category"]),
-    "Emergency Feedback": yesNo(mapped["Emergency Feedback"]),
-    "Thematic Area": strOf(mapped["Thematic Area"]),
-    "Project related to feedback": strOf(mapped["Project related to feedback"]),
-    District: strOf(mapped.District),
-    Subcounty: strOf(mapped.Subcounty),
-    Village: strOf(mapped.Village),
-    "Who is giving feedback?": strOf(mapped["Who is giving feedback?"]),
-    Gender: maleFemale(mapped.Gender),
-    Age: numOf(mapped.Age),
-    "Description of feedback, suggestion or complaint": strOf(
-      mapped["Description of feedback, suggestion or complaint"]
-    ),
-    "Description of actions taken": strOf(mapped["Description of actions taken"]),
-    "Referral Status": strOf(mapped["Referral Status"]),
-    "Status of this feedback": strOf(mapped["Status of this feedback"]),
-    "Date feedback was resolved": strOf(mapped["Date feedback was resolved"]),
-    "Days taken to resolved this feedback": numOf(
-      mapped["Days taken to resolved this feedback"]
-    ),
-    "Reported to Integrity Focal Person": strOf(
-      mapped["Reported to Integrity Focal Person"]
-    ),
-    "Feedback requires urgent response": strOf(
-      mapped["Feedback requires urgent response"]
-    ),
-    "Feedback Categorized as": strOf(mapped["Feedback Categorized as"]),
-    _submission_time: strOf(mapped._submission_time),
-    _id: numOf(mapped._id) ?? 0,
-    _uuid: strOf(mapped._uuid) ?? "",
-  };
+  mapped["Emergency Feedback"] = yesNo(mapped["Emergency Feedback"]);
+  mapped.Gender = maleFemale(mapped.Gender);
+  mapped._id = numOf(mapped._id) ?? 0;
+  mapped._uuid = strOf(mapped._uuid) ?? "";
+  mapped._submission_time = strOf(mapped._submission_time) ?? null;
+
+  // Step 5 (defensive): drop non-Cell values from `mapped` before the
+  // open-dict cast. Kobo metadata dicts list-shaped (_geolocation,
+  // _attachments, _validation_status, _notes, _tags) are not
+  // string|number|null and would crash consumers that call
+  // `String(value)` (e.g. Step 12's detail-drawer auto-discovery).
+  // Today's strict 24-field projection dropped them implicitly; this
+  // explicit filter reproduces today's silent-drop behaviour so
+  // Step 3 preserves the Cordaid runtime characteristics exactly.
+  for (const k of Object.keys(mapped)) {
+    if (!isCell(mapped[k])) delete mapped[k];
+  }
+
+  return mapped as DynamicRecord;
 }
 
 export async function fetchKoboSubmissions(
