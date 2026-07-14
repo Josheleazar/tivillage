@@ -26,12 +26,26 @@ function pickFreshness(iso: string | undefined): string | null {
 export function SourceChip({ meta, className }: SourceChipProps) {
   if (!meta) return null;
 
+  // Post-Step-4, ApiMeta.source can be:
+  //   "local"             — bundled JSON fallback (no env keys)
+  //   "<formId>"          — live KoboToolbox for the active form,
+  //                         e.g. "cordaidDemo", "Wework"
+  //   "<formId>-fallback" — Kobo request failed, served fallback
+  //
+  // These predicates dispatch by suffix / exact-match so the legacy
+  // "kobo" / "kobo-fallback" / "local" triple (and post-Step-4
+  // per-form variants) all hit the same branch without per-form
+  // hardcoding in this component.
+  const isFallback =
+    typeof meta.source === "string" && meta.source.endsWith("-fallback");
+  const isLocal = meta.source === "local";
+
   let label: string;
   let title: string;
   let Icon: typeof Cloud = Database;
   let tone: "default" | "live" | "warning" = "default";
 
-  if (meta.source === "kobo") {
+  if (!isFallback && !isLocal) {
     Icon = Cloud;
     const fresh = pickFreshness(meta.fetchedAt);
     const truncatedNote =
@@ -47,7 +61,7 @@ export function SourceChip({ meta, className }: SourceChipProps) {
       ? `Kobo asset · ${meta.uid}${meta.name ? ` (${meta.name})` : ""}`
       : "Live KoboToolbox feed";
     tone = "live";
-  } else if (meta.source === "kobo-fallback") {
+  } else if (isFallback) {
     Icon = AlertTriangle;
     label = `${meta.count.toLocaleString()} records · Kobo error, using local JSON`;
     title = meta.error

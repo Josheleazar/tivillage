@@ -1,11 +1,13 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import type { ApiMeta, DynamicRecord } from "@/lib/types";
 import {
   fetchKoboSubmissions,
   type KoboConfig,
 } from "@/lib/kobo";
+import { getForm } from "@/lib/dashboards";
 
 // Node runtime so `fs` is available for the JSON fallback; Kobo fetches
 // use plain `fetch`, which works on Node and Edge.
@@ -35,18 +37,74 @@ async function readLocalJson(): Promise<DynamicRecord[]> {
   return JSON.parse(raw) as DynamicRecord[];
 }
 
-export async function GET() {
-  const token = process.env.KOBO_API_TOKEN;
-  const assetUid = process.env.KOBO_ASSET_UID;
-  const baseUrl = process.env.KOBO_BASE_URL || DEFAULT_KOBO_BASE_URL;
+/**
+ * Resolves env keys for the active form via its envPrefix. Each form's
+ * `<envPrefix>_ASSET_UID` is read primarily, with a `_DEV` fallback
+ * that lets us flip the live prod value into a sandboxed dev value
+ * for testing (without renaming env vars in Vercel). Token + base URL
+ * fall back to the bare `KOBO_*` keys for dev convenience so a single
+ * shared KOBO_API_TOKEN can serve multiple forms until each gets its
+ * own dedicated credentials in prod.
+ */
+function resolveEnv(envPrefix: string): {
+  token: string | undefined;
+  assetUid: string | undefined;
+  baseUrl: string;
+} {
+  return {
+    assetUid:
+      process.env[`${envPrefix}_ASSET_UID_DEV`] ??
+      process.env[`${envPrefix}_ASSET_UID`],
+    baseUrl:
+      process.env[`${envPrefix}_BASE_URL`] ??
+      process.env.KOBO_BASE_URL ??
+      DEFAULT_KOBO_BASE_URL,
+    token:
+      process.env[`${envPrefix}_API_TOKEN`] ??
+      process.env.KOBO_API_TOKEN,
+  };
+}
+
+/**
+ * Cordaid has a bundled JSON fallback (data/feedback.json is its
+ * static export). Other forms have no fallback artefact — they report
+ * an empty record set on Kobo error rather than silently serving the
+ * wrong form's data labelled as the active form. Step 14's repo
+ * housekeeping can drop a Wework.json stub if the team wants a
+ * testing fallback for WeWork too.
+ */
+async function readLocalFallback(formId: string): Promise<DynamicRecord[]> {
+  if (formId !== "cordaidDemo") return [];
+  return readLocalJson();
+}
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const form = getForm(searchParams.get("form"));
+
+  const { token, assetUid, baseUrl } = resolveEnv(form.envPrefix);
 
   if (token && assetUid) {
+    // unstable_cache wraps the Kobo fetch with per-form cache identity.
+    // The cache key is ["kobo-fetch", form.id] so Cordaid and WeWork
+    // never share a cache slot — even though `revalidate = 60` would
+    // route-cache the per-form URLs identically. The tag `kobo-<formId>`
+    // enables operator-driven refresh from a future script:
+    //   revalidateTag(`kobo-Wework`) from a Vercel cron, for instance.
+    const taggedFetch = unstable_cache(
+      async () =>
+        fetchKoboSubmissions({
+          token: token!,
+          assetUid: assetUid!,
+          baseUrl,
+        } satisfies KoboConfig),
+      ["kobo-fetch", form.id],
+      { revalidate: 60, tags: [`kobo-${form.id}`] }
+    );
     try {
-      const result = await fetchKoboSubmissions(
-        { token, assetUid, baseUrl } satisfies KoboConfig
-      );
+      const result = await taggedFetch();
       const meta: ApiMeta = {
-        source: "kobo",
+        source: form.id,
         count: result.records.length,
         uid: result.uid,
         name: result.name,
@@ -61,34 +119,37 @@ export async function GET() {
           count: result.records.length,
           records: result.records,
           meta: result.truncated
-            ? // Truncated responses should refresh more aggressively so we
-              // pick up newly added pages sooner.
-              { ...meta, _cacheHint: "truncated" as const }
+            ? {
+                ...meta,
+                _cacheHint: "truncated" as const,
+              }
             : meta,
         },
         { headers: CACHE_HEADERS }
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown Kobo error";
-      const local = await readLocalJson();
+      const records = await readLocalFallback(form.id);
       const meta: ApiMeta = {
-        source: "kobo-fallback",
-        count: local.length,
+        source: `${form.id}-fallback`,
+        count: records.length,
         uid: assetUid,
         baseUrl,
         error: message,
       };
       return NextResponse.json(
-        { count: local.length, records: local, meta },
+        { count: records.length, records, meta },
         { headers: FALLBACK_CACHE_HEADERS }
       );
     }
   }
 
-  const local = await readLocalJson();
-  const meta: ApiMeta = { source: "local", count: local.length };
+  // No env keys → local-only path. Cordaid has bundled JSON; other
+  // forms return empty records.
+  const records = await readLocalFallback(form.id);
+  const meta: ApiMeta = { source: "local", count: records.length };
   return NextResponse.json(
-    { count: local.length, records: local, meta },
+    { count: records.length, records, meta },
     { headers: CACHE_HEADERS }
   );
 }
