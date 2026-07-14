@@ -198,7 +198,14 @@ export interface KpiConfig {
   /** Unique key surfaced in `computeKpis(records, config)` output. */
   key: string;
   label: string;
-  sub: string;
+  /**
+   * Either a static subtitle string ("Filtered records", "Across
+   * resolved entries"), or a function of the filtered records when
+   * the sub needs a runtime percentage or relative figure (e.g.
+   * "23% of filtered"). Step 10's kpi-cards.tsx checks `typeof sub`
+   * at render time.
+   */
+  sub: string | ((records: DynamicRecord[]) => string);
   iconName: KpiIconName;
   /** Tailwind utility classes for the icon chip — e.g. "bg-rose-50 text-cordaid-red". */
   accent: string;
