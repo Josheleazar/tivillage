@@ -1,16 +1,22 @@
 import { Activity, Database } from "lucide-react";
-import type { ApiMeta, FeedbackRecord } from "@/lib/types";
+import type { ApiMeta, DynamicRecord, FormConfig } from "@/lib/types";
 import { SourceChip } from "./source-chip";
 
 interface HeaderProps {
-  records: FeedbackRecord[];
+  records: DynamicRecord[];
   meta: ApiMeta | null;
+  // Form is passed through so the Period chip reads from
+  // `form.dateColumn` (Cordaid: "Date", WeWork: "_submission_time")
+  // and the top marque displays `form.label`. Without this prop the
+  // header would hard-code `r.Date` for every form, leaving
+  // WeWork's Period section blank.
+  form: FormConfig;
 }
 
-export function DashboardHeader({ records, meta }: HeaderProps) {
+export function DashboardHeader({ records, meta, form }: HeaderProps) {
   const dates = records
-    .map((r) => r.Date)
-    .filter((d): d is string => !!d)
+    .map((r) => r[form.dateColumn])
+    .filter((d): d is string => typeof d === "string" && !!d)
     .sort();
   const minDate = dates[0];
   const maxDate = dates[dates.length - 1];
@@ -22,10 +28,12 @@ export function DashboardHeader({ records, meta }: HeaderProps) {
           <div>
             <div className="flex items-center gap-2 text-white/80 text-xs font-semibold tracking-widest uppercase mb-2">
               <Activity className="h-4 w-4" />
-              <span>Cordaid · Accountability</span>
+              <span>{form.label} · Accountability</span>
             </div>
             <h1 className="text-2xl md:text-3xl font-extrabold leading-tight">
-              Feedback and Response Dashboard
+              {form.label === "cordaidDemo"
+                ? "Feedback and Response Dashboard"
+                : `${form.label} dashboard`}
             </h1>
             <p className="mt-2 text-sm text-white/90 max-w-2xl">
               Interactive analytics for Kobo feedback records. Use the filters

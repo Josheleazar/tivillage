@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Charts } from "@/components/dashboard/charts";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { DetailDrawer } from "@/components/dashboard/detail-drawer";
 import { FeedbackTable } from "@/components/dashboard/feedback-table";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { KpiCards } from "@/components/dashboard/kpi-cards";
-import { computeKpis, applyFilters, downloadCsv, toCsv } from "@/lib/filters";
-import type { ApiMeta, FeedbackRecord, Filters } from "@/lib/types";
+import { applyFilters, computeKpis, downloadCsv, toCsv } from "@/lib/filters";
+import type { ApiMeta, DynamicRecord, Filters } from "@/lib/types";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { getForm } from "@/lib/dashboards";
 
 const DATE_BOUNDS_KEY = "cordaid-date-bounds";
 
@@ -21,61 +23,102 @@ function withDefaultDates(filters: Filters, bounds: { min: string; max: string }
   };
 }
 
+function pickBounds(
+  records: DynamicRecord[],
+  column: string,
+): { min: string; max: string } {
+  const dates = records
+    .map((r) => r[column])
+    .filter((d): d is string => typeof d === "string" && !!d)
+    .sort();
+  return { min: dates[0] ?? "", max: dates[dates.length - 1] ?? "" };
+}
+
+function emptyFilters(): Filters {
+  return {
+    project: "",
+    district: "",
+    subcounty: "",
+    category: "",
+    status: "",
+    gender: "",
+    channel: "",
+    thematic: "",
+    referral: "",
+    emergency: "",
+    search: "",
+    startDate: "",
+    endDate: "",
+  };
+}
+
 export function DashboardClient() {
-  const [records, setRecords] = useState<FeedbackRecord[]>([]);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // URL is the source of truth for the active form (locked plan). The
+  // ?form= value passes through getForm() which falls back to
+  // DEFAULT_FORM for unknown ids so a malformed URL never breaks the
+  // dashboard layout.
+  const form = getForm(searchParams.get("form"));
+  const formKey = form.id;
+
+  const [records, setRecords] = useState<DynamicRecord[]>([]);
   const [meta, setMeta] = useState<ApiMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Filter state retains the legacy `Filters` shape today so the
+  // existing lib/filters.ts helpers keep compiling — Step 7 reformats
+  // it to `Record<string, string>` keyed by FilterDef.key. The state
+  // shape is unchanged at this step.
   const [filters, setFilters] = useState<Filters | null>(null);
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<FeedbackRecord | null>(null);
+  const [selected, setSelected] = useState<DynamicRecord | null>(null);
 
+  // Reactive document title per D9. SSR renders without this effect
+  // (returns the static title in app/layout.tsx); the effect flips the
+  // tab title the moment React mounts and again on every form switch.
+  useEffect(() => {
+    document.title = `${form.label} · Feedback Dashboard`;
+  }, [form.label]);
+
+  // Re-fetch on formKey/dateColumn change. The dependency on
+  // form.dateColumn ensures a date-column rebuild re-triggers the
+  // hooks even within the same form. The cancel flag prevents a stale
+  // fetch's resolve from clobbering a fresh records array when the
+  // user switches rapidly between forms.
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setRecords([]);
+    setFilters(null);
+    setSelected(null);
     async function load() {
       try {
-        const res = await fetch("/api/feedback", { cache: "no-store" });
+        const res = await fetch(
+          `/api/feedback?form=${encodeURIComponent(formKey)}`,
+          { cache: "no-store" },
+        );
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = (await res.json()) as {
-          records: FeedbackRecord[];
+          records: DynamicRecord[];
           meta?: ApiMeta;
         };
         if (cancelled) return;
         setRecords(data.records);
         setMeta(data.meta ?? null);
-        const dates = data.records
-          .map((r) => r.Date)
-          .filter((d): d is string => !!d)
-          .sort();
-        const bounds = { min: dates[0] ?? "", max: dates[dates.length - 1] ?? "" };
+        const bounds = pickBounds(data.records, form.dateColumn);
         try {
           window.localStorage.setItem(
-            DATE_BOUNDS_KEY,
-            JSON.stringify(bounds)
+            `${DATE_BOUNDS_KEY}-${formKey}`,
+            JSON.stringify(bounds),
           );
         } catch {
           // ignore storage errors (private mode)
         }
-        setFilters(
-          withDefaultDates(
-            {
-              project: "",
-              district: "",
-              subcounty: "",
-              category: "",
-              status: "",
-              gender: "",
-              channel: "",
-              thematic: "",
-              referral: "",
-              emergency: "",
-              search: "",
-              startDate: "",
-              endDate: "",
-            } satisfies Filters,
-            bounds
-          )
-        );
+        setFilters(withDefaultDates(emptyFilters(), bounds));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         if (!cancelled) setError(message);
@@ -87,10 +130,10 @@ export function DashboardClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [formKey, form.dateColumn]);
 
   const filtered = useMemo(() => {
-    if (!filters) return [] as FeedbackRecord[];
+    if (!filters) return [] as DynamicRecord[];
     return applyFilters(records, filters);
   }, [records, filters]);
 
@@ -102,43 +145,33 @@ export function DashboardClient() {
 
   function resetFilters() {
     if (!records.length) return;
-    const dates = records
-      .map((r) => r.Date)
-      .filter((d): d is string => !!d)
-      .sort();
-    setFilters(
-      withDefaultDates(
-        {
-          project: "",
-          district: "",
-          subcounty: "",
-          category: "",
-          status: "",
-          gender: "",
-          channel: "",
-          thematic: "",
-          referral: "",
-          emergency: "",
-          search: "",
-          startDate: "",
-          endDate: "",
-        } satisfies Filters,
-        { min: dates[0] ?? "", max: dates[dates.length - 1] ?? "" }
-      )
-    );
+    const bounds = pickBounds(records, form.dateColumn);
+    setFilters(withDefaultDates(emptyFilters(), bounds));
   }
 
   function exportCsv() {
     if (!filtered.length) return;
     const date = new Date().toISOString().slice(0, 10);
-    downloadCsv(`cordaid-feedback-${date}.csv`, toCsv(filtered));
+    downloadCsv(`${formKey}-feedback-${date}.csv`, toCsv(filtered));
   }
+
+  // switchForm strips ALL filter params on the URL per F5b — every
+  // pick hop lands on `?form=<next>` with no other query, so the URL
+  // is bookmarkable and reload-friendly. router.replace avoids pushing
+  // history entries; React reconciles without remount because the URL
+  // mutation is the only state change.
+  const switchForm = useCallback(
+    (next: string) => {
+      router.replace(`${pathname}?form=${encodeURIComponent(next)}`);
+    },
+    [pathname, router],
+  );
 
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center gap-2 text-cordaid-muted">
         <Loader2 className="h-5 w-5 animate-spin" />
-        <span className="text-sm">Loading feedback dataset…</span>
+        <span className="text-sm">Loading {form.label} dataset…</span>
       </div>
     );
   }
@@ -150,7 +183,7 @@ export function DashboardClient() {
           <AlertTriangle className="h-5 w-5 text-destructive mt-0.5" />
           <div>
             <h2 className="font-semibold text-destructive">
-              Could not load the feedback dataset
+              Could not load the {form.label} dataset
             </h2>
             <p className="text-sm text-cordaid-muted mt-1 break-all">{error}</p>
           </div>
@@ -163,7 +196,7 @@ export function DashboardClient() {
 
   return (
     <>
-      <DashboardHeader records={records} meta={meta} />
+      <DashboardHeader records={records} meta={meta} form={form} />
       <main className="container py-6 space-y-6">
         <FilterBar
           filters={filters}
