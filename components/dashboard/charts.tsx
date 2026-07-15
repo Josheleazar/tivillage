@@ -4,13 +4,7 @@ import dynamic from "next/dynamic";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BRAND, CHART_PALETTE } from "@/lib/constants";
 import { useMemo } from "react";
-import type { DynamicRecord } from "@/lib/types";
-
-// Bridge alias — Step 11 reformats charts.tsx to take a FormConfig and
-// iterate form.charts declaratively (per-spec match-on-data + render).
-// Until then this alias keeps the pre-Step-7 prop signature compileable
-// while lib/filters.ts emits DynamicRecord[].
-type FeedbackRecord = DynamicRecord;
+import type { ChartSpec, DynamicRecord, FormConfig } from "@/lib/types";
 import {
   ageDistribution,
   countBy,
@@ -27,7 +21,13 @@ const ReactECharts = dynamic(() => import("echarts-for-react"), {
 });
 
 interface ChartsProps {
-  records: FeedbackRecord[];
+  records: DynamicRecord[];
+  // Step 11: Charts now consumes the form's chart specs declaratively.
+  // Each ChartSpec routes records through the right builder based on
+  // its `type`, with `sourceColumn` for the data column and `topN` for
+  // horizontal-bar caps. Dropping the prop means dropping the whole
+  // per-spec dispatcher in this file.
+  form: FormConfig;
 }
 
 const ECOMMON = {
@@ -59,11 +59,13 @@ const ECOMMON = {
   },
 };
 
-function buildLineOption(records: FeedbackRecord[]) {
-  // Hardcode "Date" until Step 11 reformulates Charts to walk form.charts
-  // and route config.dateColumn per-spec. Step 11 will also branch on
-  // spec.type to pick the right builder.
-  const data = trendByDate(records, "Date");
+function buildLineOption(records: DynamicRecord[], dateColumn: string) {
+  // Step 11: route the trend chart by spec.sourceColumn instead of
+  // the hardcoded "Date" key. The match-on-data filter in
+  // `renderableSpecs` ensures this option is never built when no
+  // record carries a non-null value for the configured date column
+  // (WeWork's _submission_time no longer maps to nothing).
+  const data = trendByDate(records, dateColumn);
   return {
     ...ECOMMON,
     color: [BRAND.red],
@@ -108,7 +110,7 @@ function buildLineOption(records: FeedbackRecord[]) {
 }
 
 function buildHorizontalBarOption(
-  records: FeedbackRecord[],
+  records: DynamicRecord[],
   column: string,
   topN = 15
 ) {
@@ -155,7 +157,7 @@ function buildHorizontalBarOption(
 }
 
 function buildDonutOption(
-  records: FeedbackRecord[],
+  records: DynamicRecord[],
   column: string
 ) {
   const data = countBy(records, column).slice(0, 8);
@@ -199,8 +201,14 @@ function buildDonutOption(
   };
 }
 
-function buildAgeBarOption(records: FeedbackRecord[]) {
-  const data = ageDistribution(records);
+function buildAgeBarOption(
+  records: DynamicRecord[],
+  ageColumn: string
+) {
+  // Step 11: pass the form's age column through. Cordaid points at
+  // "Age" (PascalCase), WeWork at "age" (snake_case). Both resolve
+  // identically because DynamicRecord is an open index signature.
+  const data = ageDistribution(records, ageColumn);
   return {
     ...ECOMMON,
     color: [BRAND.red],
@@ -231,53 +239,76 @@ function buildAgeBarOption(records: FeedbackRecord[]) {
   };
 }
 
+/**
+ * Per-spec dispatcher (Step 11). Switches on ChartSpec.type from the
+ * active FormConfig and routes spec.sourceColumn into the right
+ * builder. The exhaustive switch guards against future ChartType
+ * additions being silently ignored — TypeScript flags a non-handled
+ * union member at compile time.
+ */
+function buildOptionForSpec(
+  records: DynamicRecord[],
+  spec: ChartSpec
+): unknown {
+  switch (spec.type) {
+    case "trend-line":
+      return buildLineOption(records, spec.sourceColumn);
+    case "horizontal-bar":
+      return buildHorizontalBarOption(
+        records,
+        spec.sourceColumn,
+        spec.topN ?? 15,
+      );
+    case "donut":
+      return buildDonutOption(records, spec.sourceColumn);
+    case "age-bar":
+      return buildAgeBarOption(records, spec.sourceColumn);
+  }
+}
+
+/**
+ * Match-on-data predicate (Step 11). A chart spec whose source column
+ * has no non-null values in the current record slice is silently
+ * skipped rather than rendering an empty chart with no signal.
+ *
+ * Defends against the silent-failure bug pattern from
+ * DASHPLUS_PLAN.md §3 — silently rendering an empty chart is
+ * indistinguishable from "the data is sparse" and confuses users.
+ * The trend-chart hardcode of "Date" was the original visible
+ * symptom: WeWork has no "Date" field, so the chart drew zero bars
+ * with no diagnostic. With match-on-data, the spec gets skipped and
+ * the user sees the "no specs match" empty state with copy explaining
+ * why.
+ */
+function hasMatchingData(
+  records: DynamicRecord[],
+  column: string
+): boolean {
+  for (const r of records) {
+    const v = r[column];
+    if (v != null && v !== "") return true;
+  }
+  return false;
+}
+
 interface ChartConfig {
   title: string;
   build: () => unknown;
 }
 
-export function Charts({ records }: ChartsProps) {
+export function Charts({ records, form }: ChartsProps) {
+  const renderableSpecs = useMemo(
+    () => form.charts.filter((spec) => hasMatchingData(records, spec.sourceColumn)),
+    [form.charts, records],
+  );
+
   const charts = useMemo<ChartConfig[]>(
-    () => [
-      { title: "Feedback trend by date", build: () => buildLineOption(records) },
-      {
-        title: "Feedback by district — Top 15",
-        build: () => buildHorizontalBarOption(records, "District", 15),
-      },
-      {
-        title: "Feedback by project",
-        build: () => buildDonutOption(records, "Project related to feedback"),
-      },
-      {
-        title: "Feedback category",
-        build: () => buildDonutOption(records, "Feedback Category"),
-      },
-      {
-        title: "Status of feedback",
-        build: () => buildDonutOption(records, "Status of this feedback"),
-      },
-      {
-        title: "Referral status",
-        build: () => buildDonutOption(records, "Referral Status"),
-      },
-      {
-        title: "Gender distribution",
-        build: () => buildDonutOption(records, "Gender"),
-      },
-      {
-        title: "Feedback channel used",
-        build: () => buildDonutOption(records, "Feedback Channel used"),
-      },
-      {
-        title: "Age group of respondents",
-        build: () => buildAgeBarOption(records),
-      },
-      {
-        title: "Thematic area",
-        build: () => buildDonutOption(records, "Thematic Area"),
-      },
-    ],
-    [records]
+    () =>
+      renderableSpecs.map((spec) => ({
+        title: spec.title,
+        build: () => buildOptionForSpec(records, spec),
+      })),
+    [renderableSpecs, records],
   );
 
   if (!records.length) {
@@ -285,6 +316,21 @@ export function Charts({ records }: ChartsProps) {
       <div className="rounded-2xl border border-dashed border-cordaid-border bg-white p-10 text-center text-sm text-cordaid-muted">
         No records match the current filters — adjust the filters above to
         see analytics.
+      </div>
+    );
+  }
+
+  if (!charts.length) {
+    // Distinct copy from the records == 0 case above so the user can
+    // tell "I filtered too aggressively" apart from "the active form's
+    // schema doesn't include any chartable columns in this slice".
+    return (
+      <div className="rounded-2xl border border-dashed border-cordaid-border bg-white p-10 text-center text-sm text-cordaid-muted">
+        No chart specs match the active form's schema — the form's
+        registry entry points at columns outside the current record
+        slice, or the dataset is sparse for the active filters. Adjust
+        the filters, or add chart specs to {form.label}'s
+        `lib/dashboards/{form.id}.ts` registry entry.
       </div>
     );
   }

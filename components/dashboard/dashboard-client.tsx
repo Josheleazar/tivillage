@@ -228,7 +228,7 @@ export function DashboardClient() {
 
         <KpiCards kpis={kpis} form={form} records={filtered} />
 
-        <Charts records={filtered} />
+        <Charts records={filtered} form={form} />
 
         <FeedbackTable
           records={filtered}

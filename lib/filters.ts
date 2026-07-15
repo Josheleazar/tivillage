@@ -240,19 +240,25 @@ export function trendByDate(
 }
 
 /**
- * Stacked age buckets from `r.Age`. Coerces numeric strings
- * defensively — older Kobo deployments persisted integer questions
- * as strings, and lib/kobo.ts's numOf coercion is best-effort.
- * Records with genuinely missing/garbage ages land in the "Unknown"
- * bucket via ageBucket(null).
+ * Stacked age buckets from `r[ageColumn]`. Defaults to "Age" for
+ * backward compatibility with pre-Step-11 callers (charts.tsx
+ * pre-Step-11 was the only caller and didn't supply a column);
+ * Step 11's charts dispatcher passes spec.sourceColumn so WeWork
+ * can route via "age" while Cordaid keeps "Age" as the column key.
+ *
+ * Coerces numeric strings defensively — older Kobo deployments
+ * persisted integer questions as strings, and lib/kobo.ts's numOf
+ * coercion is best-effort. Records with genuinely missing or
+ * garbage ages land in the "Unknown" bucket via ageBucket(null).
  */
 export function ageDistribution(
-  records: DynamicRecord[]
+  records: DynamicRecord[],
+  ageColumn: string = "Age"
 ): Array<{ key: string; count: number }> {
   const order = ["Under 18", "18–24", "25–34", "35–44", "45–54", "55+", "Unknown"];
   const map = new Map<string, number>();
   for (const r of records) {
-    const raw = r.Age;
+    const raw = r[ageColumn];
     let age: number | null = null;
     if (typeof raw === "number") {
       age = raw;
