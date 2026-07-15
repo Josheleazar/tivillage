@@ -246,6 +246,7 @@ export function DashboardClient() {
       <DetailDrawer
         record={selected}
         open={open}
+        form={form}
         onOpenChange={(next) => {
           setOpen(next);
           if (!next) {

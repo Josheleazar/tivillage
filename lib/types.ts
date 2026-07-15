@@ -150,6 +150,59 @@ export interface KpiConfig {
 }
 
 /**
+ * Per-form rendering hints used by feedback-table.tsx and detail-drawer.tsx.
+ * Drives both chip rendering (Badge variants in the table + the drawer's
+ * header summary badges) and long-text section placement (drawer-only).
+ *
+ * Cordaid wires up `status` for `Status of this feedback`,
+ * `yesNo` for `Emergency Feedback` + `Feedback requires urgent
+ * response` + `Reported to Integrity Focal Person` + `Feedback
+ * Categorized as`, and `longText` for the two description columns
+ * so the drawer renders them as the original labelled sections
+ * ("The feedback" / "Actions taken") rather than as grid entries.
+ *
+ * WeWork currently declares none of these — every cell renders as
+ * plain text and the drawer has no dedicated text sections.
+ */
+export interface FieldHints {
+  /**
+   * Field keys whose values trigger the Status badge variant.
+   * Drives both the table's Badge cell (feedback-table.tsx) and
+   * the drawer's header summary badge.
+   */
+  status?: string[];
+  /**
+   * Field keys whose values trigger the Yes/No badge variant.
+   * Same dual-role as `status` — surfaced in the table + the
+   * drawer's header emergency-style badge.
+   */
+  yesNo?: string[];
+  /**
+   * Field keys whose values render as full-width long-text sections
+   * inside the detail drawer (one section per entry). `title`
+   * overrides the auto-derived label so Cordaid's "The feedback" /
+   * "Actions taken" section headers stay verbatim.
+   */
+  longText?: Array<{ field: string; title?: string }>;
+}
+
+/**
+ * Header content source for the detail drawer. The drawer walks
+ * `titleField` to read the title text (falling back to a global
+ * "Anonymous respondent" if the field's value is null/empty) and
+ * joins `subtitleFields` with " · " for the DrawerDescription.
+ *
+ * Cordaid declares titleField: "Who is giving feedback?" +
+ * subtitleFields: ["Activity", "Project related to feedback"].
+ * WeWork declares titleField: "_submission_time" + subtitleFields:
+ * ["district", "gender", "businesstype"].
+ */
+export interface DrawerHeaderSpec {
+  titleField?: string;
+  subtitleFields?: string[];
+}
+
+/**
  * One column in the records table.
  */
 export interface TableColumnDef {
@@ -204,6 +257,10 @@ export interface FormConfig {
   kpis: KpiConfig[];
   charts: ChartSpec[];
   tableColumns: TableColumnDef[];
+  /** Per-form render hints (chip dispatch + long-text sections). */
+  fieldHints?: FieldHints;
+  /** Drawer header content source for the detail-drawer auto-discover path. */
+  drawerHeader?: DrawerHeaderSpec;
 }
 
 // -----------------------------------------------------------------------------

@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { searchRecords } from "@/lib/filters";
+import { searchRecords, statusVariant, yesNoVariant } from "@/lib/filters";
 import { cn } from "@/lib/utils";
 import type { Cell, DynamicRecord, FormConfig } from "@/lib/types";
 
@@ -59,35 +59,6 @@ function buildComparator(
     const sb = String(vb);
     return dir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
   };
-}
-
-/**
- * Status-derived Badge variant. Coerces Cell to string before the
- * includes() check so integer/null Cell variants don't trip TS — Kobo
- * select_one options normalise to display labels, so Cell is
- * overwhelmingly a string here, but older deployments can leave
- * numeric responses as numbers.
- */
-function statusVariant(status: Cell): "success" | "warning" | "muted" {
-  const v =
-    typeof status === "string"
-      ? status
-      : status == null
-        ? ""
-        : String(status);
-  if (!v) return "muted";
-  if (v.includes("Resolved")) return "success";
-  if (v.includes("New") || v.includes("Under")) return "warning";
-  return "muted";
-}
-
-/**
- * Yes/No Badge variant. Today used for boolean-style feedback like
- * Cordaid's `Emergency Feedback` column; defaults to muted when the
- * value isn't the literal "Yes".
- */
-function yesNoVariant(v: Cell): "default" | "muted" {
-  return v === "Yes" ? "default" : "muted";
 }
 
 interface FeedbackTableProps {

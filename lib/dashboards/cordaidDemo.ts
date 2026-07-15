@@ -283,4 +283,34 @@ export const cordaidDemo: FormConfig = {
       chip: "yesNo",
     },
   ],
+  // Step 9 declares chip = "status" / "yesNo" on tableColumns for the
+  // same axes the drawer should highlight. Step 12 generalises the
+  // chip dispatch onto a per-form fieldHints map so the drawer can
+  // also surface Badges for any other yes/no-shaped columns the table
+  // doesn't include (Reported to Integrity Focal Person, Feedback
+  // requires urgent response, Feedback Categorized as are drawer-only
+  // grid entries today).
+  fieldHints: {
+    status: ["Status of this feedback"],
+    yesNo: [
+      "Emergency Feedback",
+      "Reported to Integrity Focal Person",
+      "Feedback requires urgent response",
+      "Feedback Categorized as",
+    ],
+    longText: [
+      {
+        field: "Description of feedback, suggestion or complaint",
+        title: "The feedback",
+      },
+      {
+        field: "Description of actions taken",
+        title: "Actions taken",
+      },
+    ],
+  },
+  drawerHeader: {
+    titleField: "Who is giving feedback?",
+    subtitleFields: ["Activity", "Project related to feedback"],
+  },
 };

@@ -10,39 +10,86 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Calendar,
-  ClipboardList,
-  Hash,
-  MapPin,
-  MessageSquareWarning,
-  Tag,
-  User,
-} from "lucide-react";
+import { Hash, MessageSquareWarning } from "lucide-react";
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { Cell, DynamicRecord } from "@/lib/types";
+import { statusVariant, yesNoVariant } from "@/lib/filters";
+import type { Cell, DynamicRecord, FormConfig } from "@/lib/types";
 
-// Bridge alias — Step 12 reformats detail-drawer.tsx to auto-discover
-// fields from Object.entries(record) instead of the hardcoded 24-field
-// PascalCase shape. Until then this alias keeps the pre-Step-7 prop
-// signature compileable.
-type FeedbackRecord = DynamicRecord;
+// No bridge alias — detail-drawer.tsx natively consumes DynamicRecord +
+// FormConfig (fieldHints + drawerHeader) as of Step 12. lib/kobo.ts's
+// normalizeSubmission emits DynamicRecord[]; lib/filters.ts's helpers
+// consume DynamicRecord[]; we read both without aliasing.
+
+/**
+ * Reserve-set for fields the drawer auto-iteration must skip. We hide
+ * the three DynamicRecord-reserved slots (id/uuid/submission_time)
+ * separately via auto-discover rules below; the Set here captures
+ * additional meta-shaped keys (the literal `meta` dict, defensive
+ * even though lib/kobo.ts's isCell sweep already removes it).
+ */
+const HIDDEN_KEYS = new Set<string>(["_id", "_uuid", "meta"]);
+
+/**
+ * Title-fallback string. Used when drawerHeader.titleField is unset
+ * OR when the resolved record value is null/empty/non-string. Always
+ * rendered as plain text, never as a hyphen — semantically distinct
+ * from "field has no value".
+ */
+const TITLE_FALLBACK = "Anonymous respondent";
 
 interface DetailDrawerProps {
-  record: FeedbackRecord | null;
+  record: DynamicRecord | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Per-form spec driving field rendering decisions:
+   *  - `fieldHints.longText` declares which keys render as full-width
+   *    sections at the top of the drawer (one section per entry).
+   *  - `fieldHints.status` / `fieldHints.yesNo` declare which keys
+   *    get Badge treatment (status-style Resolved/New/Under and
+   *    yesNo-style default/muted).
+   *  - `drawerHeader.titleField` is the dynamic field read for the
+   *    title; `drawerHeader.subtitleFields` are joined with " · " to
+   *    compose the DrawerDescription line.
+   *
+   * The Step 12 spec landed these per-form declarations so adding a
+   * third form needs zero edits to this file.
+   */
+  form: FormConfig;
 }
 
+/**
+ * Per-cell renderer. Plain text by default; dispatches to status-style
+ * or yesNo-style Badge wrappers when the column key is in
+ * `form.fieldHints.status` / `form.fieldHints.yesNo` respectively.
+ */
+function renderCell(value: Cell, chip: "status" | "yesNo" | undefined) {
+  const display = value == null || value === "" ? "—" : String(value);
+  if (chip === "status") {
+    return <Badge variant={statusVariant(value)}>{display}</Badge>;
+  }
+  if (chip === "yesNo") {
+    return <Badge variant={yesNoVariant(value)}>{display}</Badge>;
+  }
+  return display;
+}
+
+/**
+ * One entry in the grid. Reuses the same Field-cell layout as today
+ * so visual density matches the pre-Step-12 hardcoded layout (label
+ * over value, full-width opts in to span both grid columns on sm+).
+ */
 function Field({
   label,
   value,
+  chip,
   full = false,
 }: {
   label: string;
   value: Cell;
+  chip?: "status" | "yesNo";
   full?: boolean;
 }) {
   return (
@@ -51,47 +98,96 @@ function Field({
         {label}
       </span>
       <span className="text-sm text-cordaid-dark break-words">
-        {value == null || value === "" ? "—" : String(value)}
+        {renderCell(value, chip)}
       </span>
     </div>
   );
 }
 
-function StatusBadge({ value }: { value: Cell }) {
-  // Coerce numerics to string for the .includes() check. Kobo select_one
-  // options normalise to display labels so Cell here is overwhelmingly a
-  // string; lib/kobo.ts can leave integer responses as numbers under
-  // older deployments, hence the defensive String() coercion below.
-  const v =
-    typeof value === "string"
-      ? value
-      : value == null
-        ? ""
-        : String(value);
-  if (!v) {
-    return <Badge variant="muted">—</Badge>;
-  }
-  if (v.includes("Resolved")) return <Badge variant="success">{v}</Badge>;
-  if (v.includes("New") || v.includes("Under"))
-    return <Badge variant="warning">{v}</Badge>;
-  return <Badge variant="default">{v}</Badge>;
+/**
+ * Per-field chip lookup. Returns the chip kind for a given key, or
+ * undefined for plain-text rendering. Centralised so the auto-discover
+ * grid + the per-section renderers share the SAME dispatch.
+ */
+function chipForKey(form: FormConfig, key: string): "status" | "yesNo" | undefined {
+  if (form.fieldHints?.status?.includes(key)) return "status";
+  if (form.fieldHints?.yesNo?.includes(key)) return "yesNo";
+  return undefined;
 }
 
-export function DetailDrawer({ record, open, onOpenChange }: DetailDrawerProps) {
+/**
+ * Title-case humanisation for record keys NOT surfaced in
+ * `form.tableColumns`. Fallback for the few drawer-only fields the
+ * Cordaid grid carries — `_submission_time`, `Subcounty`, `Village`,
+ * `Feedback Channel used`, `Thematic Area`, `Date feedback was
+ * resolved`, `Reported to Integrity Focal Person`, `Feedback
+ * requires urgent response`, `Feedback Categorized as`. Title case
+ * reads better than the raw snake_case / PascalCase key verbatim.
+ *
+ * "Days taken to resolved this feedback" → "Days Taken To Resolved
+ * This Feedback" — readable, even if slightly verbose for the
+ * handful of long-titled fields. Forms that want exact control can
+ * future-proof with a `drawerLabels?: Record<string, string>` config.
+ */
+function humanize(key: string): string {
+  return key
+    .replace(/[_/]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/**
+ * Cell-label resolution. Looks up `form.tableColumns.label` by key
+ * first (covers the 10 fields Cordaid's table renders with curated
+ * labels like "Project", "Category", "Days"); falls back to
+ * humanize(key) for any key NOT in tableColumns.
+ */
+function labelForKey(form: FormConfig, key: string): string {
+  const col = form.tableColumns.find((c) => c.key === key);
+  return col ? col.label : humanize(key);
+}
+
+/**
+ * Read the drawer's title text. Pulls drawerHeader.titleField and
+ * returns its string value (or empty string when null/non-string).
+ * Falls back to TITLE_FALLBACK for missing/empty results so the
+ * header always renders a non-empty title line.
+ */
+function readTitle(record: DynamicRecord, form: FormConfig): string {
+  const f = form.drawerHeader?.titleField;
+  if (!f) return TITLE_FALLBACK;
+  const v = record[f];
+  if (typeof v !== "string" || !v) return TITLE_FALLBACK;
+  return v;
+}
+
+/**
+ * Read the drawer's subtitle. Walks drawerHeader.subtitleFields,
+ * joins each non-empty string with " · ". Returns null when no
+ * subtitle field contributes a non-empty string so the Drawer
+ * Description collapses cleanly (vs rendering a dangling " · ").
+ */
+function readSubtitle(record: DynamicRecord, form: FormConfig): string | null {
+  const fields = form.drawerHeader?.subtitleFields ?? [];
+  const parts: string[] = [];
+  for (const f of fields) {
+    const v = record[f];
+    if (typeof v === "string" && v) parts.push(v);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
+export function DetailDrawer({
+  record,
+  open,
+  onOpenChange,
+  form,
+}: DetailDrawerProps) {
   const [copied, setCopied] = useState(false);
 
   if (!record) return null;
-
-  // Coerce Cell → string defensively. Pre-Step-7 FeedbackRecord typed the
-  // description as `string | null`, but DynamicRecord widens it to Cell
-  // (string | number | null) which doesn't have a length property.
-  const description = String(
-    record["Description of feedback, suggestion or complaint"] ?? "",
-  );
-  const descriptionShort =
-    description.length > 220
-      ? description.slice(0, 220).trimEnd() + "…"
-      : description;
 
   async function copyUuid() {
     if (!record) return;
@@ -100,82 +196,146 @@ export function DetailDrawer({ record, open, onOpenChange }: DetailDrawerProps) 
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Silently ignore — user can still see uuid below
+      // Silently ignore — user can still see uuid below.
     }
+  }
+
+  // Per-form config-derived sets. We freeze the hidden-set + longText
+  // set on every render — small (≤ 20 entries) so Set spread is cheap.
+  const longTextKeys = new Set(
+    (form.fieldHints?.longText ?? []).map((l) => l.field),
+  );
+
+  // Emergency-style header badge: take the FIRST yesNo key declared
+  // and show its "Yes" value as a Badge with the warning icon. Cordaid
+  // declares "Emergency Feedback" first; WeWork declares none. The
+  // pattern generalises to any form whose first yesNo key semantically
+  // indicates urgency.
+  const emergencyKey = form.fieldHints?.yesNo?.[0];
+  const emergencyValue = emergencyKey ? record[emergencyKey] : null;
+  const showEmergency = emergencyValue === "Yes";
+
+  // Status header badge: the FIRST status key declared, dispatched
+  // through statusVariant for the colour-coded Resolved/New/Under
+  // badge. Cordaid declares "Status of this feedback".
+  const statusKey = form.fieldHints?.status?.[0];
+  const statusValue = statusKey ? record[statusKey] : null;
+
+  // Title + subtitle composition.
+  const title = readTitle(record, form);
+  const subtitle = readSubtitle(record, form);
+
+  // Build the auto-discover field list. Order:
+  //   1. form.tableColumns keys in declared order (Cordaid's curated
+  //      sequence matches the original hardcoded grid closely).
+  //   2. Any remaining record keys in Kobo-returned insertion order
+  //      (so all `_submission_time`, `Subcounty`, `Village`,
+  //      `Feedback Channel used`, etc. appear after the table columns
+  //      and after the hidden + longText reservation filter).
+  // Filters:
+  //   - HIDDEN_KEYS: _id, _uuid, meta (defensive).
+  //   - longTextKeys: reserved for dedicated sections above the grid.
+  //   - Undefined record values are still rendered — the auto-discover
+  //     preserves the field even when Kobo returned null, so the user
+  //     can see "—" instead of a shrinking field list per record.
+  const tableColumnOrder = form.tableColumns.map((c) => c.key);
+  const tableColumnSet = new Set(tableColumnOrder);
+  const seen = new Set<string>();
+  const orderedEntries: Array<[string, Cell]> = [];
+
+  // Pass 1: tableColumns keys in declared order.
+  for (const k of tableColumnOrder) {
+    if (HIDDEN_KEYS.has(k) || longTextKeys.has(k)) continue;
+    if (!(k in record)) continue;
+    orderedEntries.push([k, record[k]]);
+    seen.add(k);
+  }
+  // Pass 2: remaining keys in Kobo-returned insertion order.
+  for (const [k, v] of Object.entries(record)) {
+    if (seen.has(k)) continue;
+    if (HIDDEN_KEYS.has(k) || longTextKeys.has(k)) continue;
+    if (!tableColumnSet.has(k) && (k === "_submission_time" || k === "meta")) continue;
+    orderedEntries.push([k, v]);
+    seen.add(k);
   }
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent side="right">
         <DrawerHeader>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="muted">
               <Hash className="h-3 w-3 mr-1" />
               {record._id}
             </Badge>
-            {record["Emergency Feedback"] === "Yes" && (
+            {showEmergency && (
               <Badge variant="default">
-                <MessageSquareWarning className="h-3 w-3 mr-1" />
-                Emergency
+                <MessageSquareWarning
+                  className="h-3 w-3"
+                  aria-hidden="true"
+                />
+                <span className="sr-only">Emergency feedback</span>
               </Badge>
             )}
-            <StatusBadge value={record["Status of this feedback"]} />
+            {statusKey && (
+              <Badge variant={statusVariant(statusValue)}>
+                {statusValue == null || statusValue === ""
+                  ? "—"
+                  : String(statusValue)}
+              </Badge>
+            )}
           </div>
-          <DrawerTitle className="mt-2">
-            {record["Who is giving feedback?"] || "Anonymous respondent"}
-          </DrawerTitle>
-          <DrawerDescription>
-            {record.Activity ? `${record.Activity} · ` : ""}
-            {record["Project related to feedback"] ?? "Unspecified project"}
-          </DrawerDescription>
+          <DrawerTitle className="mt-2">{title}</DrawerTitle>
+          {subtitle && <DrawerDescription>{subtitle}</DrawerDescription>}
         </DrawerHeader>
 
         <div className="flex-1 overflow-auto scroll-area px-5 py-4 space-y-5">
-          <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-cordaid-muted mb-2">
-              The feedback
-            </h4>
-            <p className="text-sm leading-relaxed text-cordaid-dark" title={description}>
-              {descriptionShort || (
-                <span className="text-cordaid-muted italic">No description provided</span>
-              )}
-            </p>
-          </section>
+          {/* Long-text sections render above the grid in declared order.
+              Each section keeps the labelled heading + thematic card
+              styling so visual rhythm matches today's Cordaid drawer. */}
+          {(form.fieldHints?.longText ?? []).map((lt) => {
+            const v = record[lt.field];
+            const text =
+              typeof v === "string" ? v : v == null ? "" : String(v);
+            const preview =
+              text.length > 220
+                ? text.slice(0, 220).trimEnd() + "…"
+                : text;
+            const title = lt.title ?? humanize(lt.field);
+            return (
+              <section key={lt.field}>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-cordaid-muted mb-2">
+                  {title}
+                </h4>
+                <Card className="bg-cordaid-cream/60 p-4">
+                  <p
+                    className="text-sm leading-relaxed text-cordaid-dark"
+                    title={text}
+                  >
+                    {preview || (
+                      <span className="italic text-cordaid-muted">
+                        No content yet
+                      </span>
+                    )}
+                  </p>
+                </Card>
+              </section>
+            );
+          })}
 
-          <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-cordaid-muted mb-2">
-              Actions taken
-            </h4>
-            <Card className="bg-cordaid-cream/60 p-4">
-              <p className="text-sm leading-relaxed text-cordaid-dark">
-                {record["Description of actions taken"] || (
-                  <span className="italic text-cordaid-muted">
-                    No actions recorded yet
-                  </span>
-                )}
-              </p>
-            </Card>
-          </section>
-
+          {/* Auto-discovered grid of remaining fields. */}
           <section className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-            <Field label="Date" value={record.Date} />
-            <Field label="Submission time" value={record._submission_time} />
-            <Field label="District" value={record.District} />
-            <Field label="Subcounty" value={record.Subcounty} />
-            <Field label="Village" value={record.Village} />
-            <Field label="Channel" value={record["Feedback Channel used"]} />
-            <Field label="Category" value={record["Feedback Category"]} />
-            <Field label="Thematic area" value={record["Thematic Area"]} />
-            <Field label="Gender" value={record.Gender} />
-            <Field label="Age" value={record.Age} />
-            <Field label="Referral status" value={record["Referral Status"]} />
-            <Field label="Days to resolve" value={record["Days taken to resolved this feedback"]} />
-            <Field label="Date resolved" value={record["Date feedback was resolved"]} />
-            <Field label="Reported to integrity focal person" value={record["Reported to Integrity Focal Person"]} />
-            <Field label="Requires urgent response" value={record["Feedback requires urgent response"]} />
-            <Field label="Categorized as" value={record["Feedback Categorized as"]} />
+            {orderedEntries.map(([key, value]) => (
+              <Field
+                key={key}
+                label={labelForKey(form, key)}
+                value={value}
+                chip={chipForKey(form, key)}
+              />
+            ))}
           </section>
 
+          {/* Submission ID + copy-UUID section. */}
           <section className="pt-2 border-t border-cordaid-border">
             <div className="flex items-center justify-between gap-2 mb-2">
               <h4 className="text-xs font-semibold uppercase tracking-wide text-cordaid-muted">
@@ -197,27 +357,6 @@ export function DetailDrawer({ record, open, onOpenChange }: DetailDrawerProps) 
               {record._uuid}
             </code>
           </section>
-        </div>
-
-        <div className="border-t border-cordaid-border px-5 py-4 text-xs text-cordaid-muted flex flex-wrap gap-4">
-          <span className="inline-flex items-center gap-1.5">
-            <Calendar className="h-3.5 w-3.5" />
-            {record.Date ?? "—"}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <MapPin className="h-3.5 w-3.5" />
-            {record.District ?? "—"}
-            {record.Subcounty ? ` · ${record.Subcounty}` : ""}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <User className="h-3.5 w-3.5" />
-            {record["Who is giving feedback?"] ?? "Anonymous"}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <ClipboardList className="h-3.5 w-3.5" />
-            <Tag className="h-3.5 w-3.5" />
-            {record.Activity ?? "—"}
-          </span>
         </div>
       </DrawerContent>
     </Drawer>

@@ -1,17 +1,15 @@
 # Multi-form dashboard — build plan (`dashPlus`)
 
-> **Status:** in progress on `dashPlus`. Steps 1–6 complete plus Steps 7+10
-> and Step 11 (all three shipped in lock-step because the FormConfig-aware
-> lib/filters.ts plus the per-spec charts reformat close the loop on the
-> silent-empty-chart failure mode flagged in §3 Bug C). Steps 8, 9, and
-> 12 remain; each is a pure-internal refactor that drops one of the
-> three remaining bridge-alias consumers. `pnpm typecheck` PASS at every
-> shipped boundary. Cordaid runtime parity verified by inspection
-> (applyFilters predicate order, 13 filter widgets, 8 KPI closures, 10
-> CSV columns, 10 form.charts specs all match cordaidDemo.ts field-
-> for-field). Push policy is unchanged: no push, branch lives locally.
-> **Branch:** `dashPlus` (already created). **Push policy:** none, per
-> standing rule.
+> **Status:** in progress on `dashPlus`. Steps 1–11 complete (Steps 7+10,
+> Step 8+9, and Step 11 each shipped in a single bundled commit because
+> each pair closes out a FeedbackRecord bridge alias with no remaining
+> per-form branching — the only outstanding step before ETE verification
+> is Step 12). `pnpm typecheck` PASS at every shipped boundary. Cordaid
+> runtime parity verified by inspection (applyFilters predicate order,
+> 13 filter widgets, 8 KPI closures, 10 CSV columns, 10 form.charts
+> specs all match cordaidDemo.ts field-for-field). Push policy is
+> unchanged: no push, branch lives locally. **Branch:** `dashPlus`
+> (already created). **Push policy:** none, per standing rule.
 > **Date:** 2026-07.
 
 This document locks the design for a multi-form version of the Cordaid
@@ -670,11 +668,18 @@ the three UX nitpicks X1–X3 are resolved.
 - Step 6 — FormPicker with a11y polish — DONE (commit `bf1b3fc`).
 - **Step 7 + 10 — FormConfig-aware `lib/filters.ts` + KPI tile
   iteration — DONE (commit `ca2bde8`).**
-- Step 8 — `filter-bar.tsx` reads form.filters — pending. The local
-  `FeedbackRecord` bridge alias grows an eslint comment marking the
-  step that removes it.
-- Step 9 — `feedback-table.tsx` reads form.tableColumns — pending
-  (alias already in place for Step 7's `form: FormConfig` prop wire).
+- **Step 8 + 9 — `filter-bar.tsx` reads form.filters +
+  `feedback-table.tsx` reads form.tableColumns — DONE (commit
+  `7cd0d3d`).** Both bridge aliases dropped; FILTER_DEFS removed from
+  lib/constants.ts; TableColumnDef.chip drives Badge rendering
+  (Cordaid keeps Status + Emergency badges, WeWork renders plain
+  text on all 10 columns). Bundles the new shared
+  `boundsForDateColumn(records, column)` helper in lib/filters.ts so
+  DashboardClient's filter-state hydration AND filter-bar's per-
+  widget min/max normalisation draw from identical YYYY-MM-DD
+  bounds — without the shared helper, WeWork's `_submission_time`
+  could store full ISO datetime strings in state while filter-bar's
+  bounds computed "2026-07-08" for min.
 - **Step 11 — `charts.tsx` per-spec data routing — DONE (commit
   `28e5a59`).** Full rewrite: form: FormConfig prop, renderableSpecs
   match-on-data filter, exhaustive `buildOptionForSpec` dispatcher,

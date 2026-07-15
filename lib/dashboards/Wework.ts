@@ -244,4 +244,20 @@ export const Wework: FormConfig = {
     { key: "score_gender", label: "Score: Gender", align: "right" },
     { key: "score_vuln", label: "Score: Vuln", align: "right" },
   ],
+  // Step 12 auto-discover drawer config: WeWork has no description-
+  // style long-text fields, no status / yesNo columns, so the
+  // auto-discover path renders every grid cell as plain text and the
+  // header reads from _submission_time since there's no "Who is
+  // giving feedback?"-style respondent-title field. The subtitle
+  // composes district + gender + businesstype into a short summary
+  // line beneath the title.
+  fieldHints: {
+    status: [],
+    yesNo: [],
+    longText: [],
+  },
+  drawerHeader: {
+    titleField: "_submission_time",
+    subtitleFields: ["district", "gender", "businesstype"],
+  },
 };

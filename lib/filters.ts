@@ -338,3 +338,40 @@ export function downloadCsv(filename: string, csv: string) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Status-derived Badge variant. Exported publicly so detail-drawer.tsx
+ * and feedback-table.tsx share the SAME Resolved/New/Under dispatch
+ * — without a shared helper the two render paths could drift and a
+ * record's status would render as different colours in the table vs.
+ * the drawer.
+ *
+ * Coerces Cell to string before the .includes() check so
+ * integer/null Cell variants don't trip TS — Kobo select_one options
+ * normalise to display labels, so Cell is overwhelmingly a string
+ * here, but older deployments can leave numeric responses as numbers.
+ */
+export function statusVariant(status: Cell): "success" | "warning" | "muted" {
+  const v =
+    typeof status === "string"
+      ? status
+      : status == null
+        ? ""
+        : String(status);
+  if (!v) return "muted";
+  if (v.includes("Resolved")) return "success";
+  if (v.includes("New") || v.includes("Under")) return "warning";
+  return "muted";
+}
+
+/**
+ * Yes/No Badge variant. Exported publicly so detail-drawer.tsx and
+ * feedback-table.tsx dispatch the same default-vs-muted decision for
+ * boolean-style columns like Cordaid's `Emergency Feedback` /
+ * `Feedback requires urgent response` / `Reported to Integrity Focal
+ * Person`. Defaults to muted when the value isn't the literal "Yes".
+ */
+export function yesNoVariant(v: Cell): "default" | "muted" {
+  return v === "Yes" ? "default" : "muted";
+}
+
