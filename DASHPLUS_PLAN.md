@@ -1,7 +1,17 @@
 # Multi-form dashboard — build plan (`dashPlus`)
 
-> **Status:** Planned, implementation not yet started.
-> **Branch:** `dashPlus` (already created). **Push policy:** none, per standing rule.
+> **Status:** in progress on `dashPlus`. Steps 1–6 complete plus Steps 7+10
+> and Step 11 (all three shipped in lock-step because the FormConfig-aware
+> lib/filters.ts plus the per-spec charts reformat close the loop on the
+> silent-empty-chart failure mode flagged in §3 Bug C). Steps 8, 9, and
+> 12 remain; each is a pure-internal refactor that drops one of the
+> three remaining bridge-alias consumers. `pnpm typecheck` PASS at every
+> shipped boundary. Cordaid runtime parity verified by inspection
+> (applyFilters predicate order, 13 filter widgets, 8 KPI closures, 10
+> CSV columns, 10 form.charts specs all match cordaidDemo.ts field-
+> for-field). Push policy is unchanged: no push, branch lives locally.
+> **Branch:** `dashPlus` (already created). **Push policy:** none, per
+> standing rule.
 > **Date:** 2026-07.
 
 This document locks the design for a multi-form version of the Cordaid
@@ -647,6 +657,36 @@ the three UX nitpicks X1–X3 are resolved.
 - **Type-checks clean**, **code-reviewed** at each step boundary.
 
 ---
+
+### Step progress on `dashPlus`
+
+- Step 1 — core types — DONE (commit `a3Fs5PQv…`).
+- Step 2 — per-form registry — DONE (cordaidDemo.ts + Wework.ts +
+  index.ts).
+- Step 3 — `lib/kobo.ts` emits `DynamicRecord` — DONE.
+- Step 4 — `/api/feedback` per-form cache + env resolution — DONE.
+- Step 5 — `DashboardClient` URL hydration, doc title, state reset —
+  DONE.
+- Step 6 — FormPicker with a11y polish — DONE (commit `bf1b3fc`).
+- **Step 7 + 10 — FormConfig-aware `lib/filters.ts` + KPI tile
+  iteration — DONE (commit `ca2bde8`).**
+- Step 8 — `filter-bar.tsx` reads form.filters — pending. The local
+  `FeedbackRecord` bridge alias grows an eslint comment marking the
+  step that removes it.
+- Step 9 — `feedback-table.tsx` reads form.tableColumns — pending
+  (alias already in place for Step 7's `form: FormConfig` prop wire).
+- **Step 11 — `charts.tsx` per-spec data routing — DONE (commit
+  `28e5a59`).** Full rewrite: form: FormConfig prop, renderableSpecs
+  match-on-data filter, exhaustive `buildOptionForSpec` dispatcher,
+  two distinct empty states (records-empty vs specs-empty). Bundles
+  `lib/filters.ts` `ageDistribution` parameterization so WeWork routes
+  through its snake_case `age` and Cordaid keeps `Age`.
+- Step 12 — `detail-drawer.tsx` auto-discovers fields —
+  pending. The Cell-coerced Field/StatusBadge signatures are the
+  final bridge step that gets cleaned up here.
+- Step 13 — End-to-end verification — pending (final typecheck +
+  browser smoke).
+- Step 14 — Final housekeeping, no push — pending.
 
 _Effective for `dashPlus`. Once #1–14 land and the ETE gate passes,
 this branch is ready to merge into `main` and ship._

@@ -10,6 +10,7 @@ import { FilterBar } from "@/components/dashboard/filter-bar";
 import { KpiCards } from "@/components/dashboard/kpi-cards";
 import {
   applyFilters,
+  boundsForDateColumn,
   computeKpis,
   downloadCsv,
   emptyFiltersForForm,
@@ -35,17 +36,6 @@ function withDefaultDates(
     startDate: bounds.min,
     endDate: bounds.max,
   };
-}
-
-function pickBounds(
-  records: DynamicRecord[],
-  column: string,
-): { min: string; max: string } {
-  const dates = records
-    .map((r) => r[column])
-    .filter((d): d is string => typeof d === "string" && !!d)
-    .sort();
-  return { min: dates[0] ?? "", max: dates[dates.length - 1] ?? "" };
 }
 
 export function DashboardClient() {
@@ -111,7 +101,7 @@ export function DashboardClient() {
         if (cancelled) return;
         setRecords(data.records);
         setMeta(data.meta ?? null);
-        const bounds = pickBounds(data.records, form.dateColumn);
+        const bounds = boundsForDateColumn(data.records, form.dateColumn);
         try {
           window.localStorage.setItem(
             `${DATE_BOUNDS_KEY}-${formKey}`,
@@ -156,7 +146,7 @@ export function DashboardClient() {
 
   function resetFilters() {
     if (!records.length) return;
-    const bounds = pickBounds(records, form.dateColumn);
+    const bounds = boundsForDateColumn(records, form.dateColumn);
     setFilters(withDefaultDates(emptyFiltersForForm(form), bounds));
   }
 
@@ -221,6 +211,7 @@ export function DashboardClient() {
         <FilterBar
           filters={filters}
           records={records}
+          form={form}
           onChange={updateFilters}
           onReset={resetFilters}
           onExport={exportCsv}

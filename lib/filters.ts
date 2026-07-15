@@ -217,6 +217,31 @@ export function countBy(
 }
 
 /**
+ * Day-level min/max derived from a date column. Used by both
+ * DashboardClient (initial startDate/endDate state hydration) and
+ * FilterBar (date widget min/max constraints). A single helper
+ * guarantees both sites normalise identically — if the function
+ * shape ever shifts (e.g. supporting epoch-seconds), both call
+ * sites follow.
+ *
+ * Returns empty-string bounds for an empty records array so the
+ * callers can hand the result directly to `<input type="date">`'s
+ * value/min/max without further guards.
+ */
+export function boundsForDateColumn(
+  records: DynamicRecord[],
+  column: string,
+): { min: string; max: string } {
+  const dates: string[] = [];
+  for (const r of records) {
+    const d = normalizeDate(r[column]);
+    if (d !== null) dates.push(d);
+  }
+  dates.sort();
+  return { min: dates[0] ?? "", max: dates[dates.length - 1] ?? "" };
+}
+
+/**
  * Trend chart series over `dateColumn`. Slices the YYYY-MM-DD prefix
  * from each value so the X axis reads naturally (day-level buckets
  * render better than minute-level). Caller is responsible for the

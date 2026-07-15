@@ -9,6 +9,9 @@ export const BRAND = {
   bg: "#faf7f2",
 } as const;
 
+// Twelve-color donut palette. Steps 7 + 11 take this verbatim into
+// charts.tsx's options. Keep tail-friendly muted palette Cordaid's
+// existing donut colour scheme.
 export const CHART_PALETTE = [
   "#EF3A4F",
   "#ad2435",
@@ -22,28 +25,4 @@ export const CHART_PALETTE = [
   "#C99E5D",
   "#5E8FA8",
   "#D08C5C",
-];
-
-export interface FilterFieldDef {
-  key: keyof import("./types").Filters;
-  label: string;
-  type: "select" | "date" | "search";
-  sourceColumn?: string;
-  span?: number;
-}
-
-export const FILTER_DEFS: FilterFieldDef[] = [
-  { key: "project", label: "Project", type: "select", sourceColumn: "Project related to feedback" },
-  { key: "district", label: "District", type: "select", sourceColumn: "District" },
-  { key: "subcounty", label: "Subcounty", type: "select", sourceColumn: "Subcounty" },
-  { key: "category", label: "Feedback category", type: "select", sourceColumn: "Feedback Category" },
-  { key: "status", label: "Status", type: "select", sourceColumn: "Status of this feedback" },
-  { key: "gender", label: "Gender", type: "select", sourceColumn: "Gender" },
-  { key: "channel", label: "Channel", type: "select", sourceColumn: "Feedback Channel used" },
-  { key: "thematic", label: "Thematic area", type: "select", sourceColumn: "Thematic Area" },
-  { key: "referral", label: "Referral status", type: "select", sourceColumn: "Referral Status" },
-  { key: "emergency", label: "Emergency feedback", type: "select", sourceColumn: "Emergency Feedback" },
-  { key: "startDate", label: "Start date", type: "date" },
-  { key: "endDate", label: "End date", type: "date" },
-  { key: "search", label: "Search text", type: "search", span: 2 },
 ];

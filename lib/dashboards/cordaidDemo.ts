@@ -7,8 +7,7 @@ import type { DynamicRecord, FormConfig } from "@/lib/types";
 //  Behavioural contract: every KPI closure returns the same value the
 //  existing dashboard renders today, every chart spec targets the same
 //  column, every filter widget matches the existing FILTER_DEFS list, and
-//  every table column matches the existing COLUMNS array + the trailing
-//  Emergency badge column.
+//  every table column matches the existing COLUMNS array.
 //
 //  Step 7 reformalises the helpers in lib/filters.ts so closures can
 //  delegate them — for Step 2 the predicates are inline so this file is
@@ -88,9 +87,8 @@ export const cordaidDemo: FormConfig = {
   label: "cordaidDemo",
   envPrefix: "KOBO",
   dateColumn: "Date",
-  // Source-of-truth for SEARCH_FIELDS in lib/filters.ts — must match
-  // line-for-line so the existing search behaviour carries through once
-  // Step 7 swaps lib/filters.ts to consume `config.searchFields`.
+  // Source-of-truth for searchFields in lib/filters.ts — cordaidDemo
+  // uses PascalCase label-shaped column names, WeWork uses snake_case.
   searchFields: [
     "Date",
     "Activity",
@@ -107,8 +105,8 @@ export const cordaidDemo: FormConfig = {
     "Status of this feedback",
     "Referral Status",
   ],
-  // 1:1 port of FILTER_DEFS in lib/constants.ts — every entry matches the
-  // existing widget set in filter-bar.tsx; the search widget keeps span=2.
+  // 1:1 port of the legacy FILTER_DEFS list (Step 8 migrates the source-
+  // of-truth from lib/constants.ts:FilterFieldDef to this FormConfig).
   filters: [
     {
       key: "project",
@@ -255,15 +253,21 @@ export const cordaidDemo: FormConfig = {
       sourceColumn: "Thematic Area",
     },
   ],
-  // 1:1 port of feedback-table.tsx's COLUMNS array + the trailing
-  // Emergency badge column. Step 9 reads `config.tableColumns` once and
-  // renders each.
+  // Step 9 reformulation: feedback-table.tsx iterates these instead of
+  // the legacy hardcoded `COLUMNS` array. The `chip` extension selects
+  // badge rendering — Status gets a colour-coded status Badge, Emergency
+  // gets a yes/No Badge. WeWork declares none of its columns with
+  // `chip`, so all of its 10 columns render as plain text.
   tableColumns: [
     { key: "Date", label: "Date" },
     { key: "Project related to feedback", label: "Project" },
     { key: "District", label: "District" },
     { key: "Feedback Category", label: "Category" },
-    { key: "Status of this feedback", label: "Status" },
+    {
+      key: "Status of this feedback",
+      label: "Status",
+      chip: "status",
+    },
     { key: "Gender", label: "Gender" },
     { key: "Age", label: "Age", align: "right" },
     { key: "Referral Status", label: "Referral" },
@@ -276,6 +280,7 @@ export const cordaidDemo: FormConfig = {
       key: "Emergency Feedback",
       label: "Emergency",
       align: "right",
+      chip: "yesNo",
     },
   ],
 };

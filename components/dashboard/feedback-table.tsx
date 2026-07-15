@@ -20,73 +20,55 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { searchRecords } from "@/lib/filters";
 import { cn } from "@/lib/utils";
 import type { Cell, DynamicRecord, FormConfig } from "@/lib/types";
 
-// Bridge alias — Step 9 reformats feedback-table.tsx to natively
-// consume DynamicRecord + FormConfig (tableColumns + searchFields).
-// Until then this aliased type keeps the pre-Step-7 prop signature
-// compileable while lib/filters.ts emits DynamicRecord[].
-type FeedbackRecord = DynamicRecord;
-
-type SortKey =
-  | "Date"
-  | "Project"
-  | "District"
-  | "Category"
-  | "Status"
-  | "Gender"
-  | "Age"
-  | "Referral"
-  | "Days";
-
-interface ColumnDef {
-  key: SortKey;
-  label: string;
-  align?: "left" | "right";
-  accessor: (r: FeedbackRecord) => string | number | null;
-}
-
-const COLUMNS: ColumnDef[] = [
-  { key: "Date", label: "Date", accessor: (r) => r.Date ?? "" },
-  {
-    key: "Project",
-    label: "Project",
-    accessor: (r) => r["Project related to feedback"] ?? "",
-  },
-  { key: "District", label: "District", accessor: (r) => r.District ?? "" },
-  { key: "Category", label: "Category", accessor: (r) => r["Feedback Category"] ?? "" },
-  { key: "Status", label: "Status", accessor: (r) => r["Status of this feedback"] ?? "" },
-  { key: "Gender", label: "Gender", accessor: (r) => r.Gender ?? "" },
-  { key: "Age", label: "Age", accessor: (r) => r.Age, align: "right" },
-  {
-    key: "Referral",
-    label: "Referral",
-    accessor: (r) => r["Referral Status"] ?? "",
-  },
-  {
-    key: "Days",
-    label: "Days",
-    accessor: (r) => r["Days taken to resolved this feedback"],
-    align: "right",
-  },
-];
+// No bridge alias — feedback-table.tsx natively consumes DynamicRecord +
+// FormConfig (tableColumns + searchFields) as of Step 9. lib/filters.ts's
+// searchRecords now emits DynamicRecord[]; we read it without aliasing.
 
 const PAGE_SIZES = [10, 25, 50, 100] as const;
 
+/**
+ * Read a record cell for use as a sort key. Lazy to keep the comparator
+ * in buildComparator as flat as possible — when sortKey advances past a
+ * row we only touch rank-of-N cell reads rather than re-fetching the
+ * search-records memo.
+ */
+function valueFor(r: DynamicRecord, key: string): Cell {
+  return r[key];
+}
+
+function buildComparator(
+  col: { key: string },
+  dir: "asc" | "desc",
+): (a: DynamicRecord, b: DynamicRecord) => number {
+  return (a, b) => {
+    const va = valueFor(a, col.key);
+    const vb = valueFor(b, col.key);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    if (typeof va === "number" && typeof vb === "number") {
+      return dir === "asc" ? va - vb : vb - va;
+    }
+    const sa = String(va);
+    const sb = String(vb);
+    return dir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
+  };
+}
+
+/**
+ * Status-derived Badge variant. Coerces Cell to string before the
+ * includes() check so integer/null Cell variants don't trip TS — Kobo
+ * select_one options normalise to display labels, so Cell is
+ * overwhelmingly a string here, but older deployments can leave
+ * numeric responses as numbers.
+ */
 function statusVariant(status: Cell): "success" | "warning" | "muted" {
-  // Coerce numerics/null to string for the .includes() check. Kobo
-  // select_one options normalise to display labels so Cell is
-  // overwhelmingly a string here, but lib/kobo.ts can also leave
-  // integer responses as numbers under older deployments.
   const v =
     typeof status === "string"
       ? status
@@ -99,23 +81,35 @@ function statusVariant(status: Cell): "success" | "warning" | "muted" {
   return "muted";
 }
 
-function emergencyVariant(v: Cell): "default" | "muted" {
+/**
+ * Yes/No Badge variant. Today used for boolean-style feedback like
+ * Cordaid's `Emergency Feedback` column; defaults to muted when the
+ * value isn't the literal "Yes".
+ */
+function yesNoVariant(v: Cell): "default" | "muted" {
   return v === "Yes" ? "default" : "muted";
 }
 
 interface FeedbackTableProps {
-  records: FeedbackRecord[];
+  records: DynamicRecord[];
   /**
-   * Form config drives the table-scoped quick filter (`searchRecords` walks
-   * `form.searchFields`). Step 9 reformats the table to also read
-   * `form.tableColumns` so the column set rebinds per form.
+   * Form config drives the table-scoped quick filter (searchRecords walks
+   * `form.searchFields`) and per-form column set (`form.tableColumns`).
+   * Step 9 reformats the table to iterate `form.tableColumns` instead of
+   * the legacy hardcoded COLUMNS array; adding a third form needs zero
+   * edits to this file.
    */
   form: FormConfig;
-  onSelect: (record: FeedbackRecord) => void;
+  onSelect: (record: DynamicRecord) => void;
 }
 
 export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("Date");
+  const columns = form.tableColumns;
+  // Default sort to the first declared column. The `?` keeps the
+  // initialiser safe when a form legitimately declares no columns
+  // (today only cordaidDemo and Wework declare 9–10 columns each); the
+  // empty string falls back to "no sort" if a form ever lists zero.
+  const [sortKey, setSortKey] = useState<string>(() => columns[0]?.key ?? "");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(25);
@@ -126,7 +120,7 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
   // FilterBar so it doesn't affect KPIs, charts, or the CSV export.
   const tableRows = useMemo(
     () => searchRecords(records, localSearch, form.searchFields),
-    [records, localSearch, form.searchFields]
+    [records, localSearch, form.searchFields],
   );
 
   // Reset to first page whenever the table-scoped search changes.
@@ -134,32 +128,33 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
     setPage(0);
   }, [localSearch]);
 
+  // Reset sortKey + page if a form switch left sortKey pointing at a
+  // column the new form doesn't have. Falls through to the first
+  // declared column for the new form so the table keeps a sensible
+  // default.
+  useEffect(() => {
+    if (!columns.some((c) => c.key === sortKey)) {
+      setSortKey(columns[0]?.key ?? "");
+      setPage(0);
+    }
+  }, [columns, sortKey]);
+
   const sortedRows = useMemo(() => {
-    const col = COLUMNS.find((c) => c.key === sortKey);
+    const col = columns.find((c) => c.key === sortKey);
     if (!col) return tableRows;
-    const comparator = (a: FeedbackRecord, b: FeedbackRecord) => {
-      const va = col.accessor(a);
-      const vb = col.accessor(b);
-      if (va == null && vb == null) return 0;
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      if (typeof va === "number" && typeof vb === "number") {
-        return sortDir === "asc" ? va - vb : vb - va;
-      }
-      const sa = String(va);
-      const sb = String(vb);
-      return sortDir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
-    };
-    return [...tableRows].sort(comparator);
-  }, [tableRows, sortKey, sortDir]);
+    return [...tableRows].sort(buildComparator(col, sortDir));
+  }, [tableRows, columns, sortKey, sortDir]);
 
   const pageCount = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
-  const pageRows = sortedRows.slice(safePage * pageSize, safePage * pageSize + pageSize);
+  const pageRows = sortedRows.slice(
+    safePage * pageSize,
+    safePage * pageSize + pageSize,
+  );
   const start = sortedRows.length === 0 ? 0 : safePage * pageSize + 1;
   const end = Math.min(sortedRows.length, safePage * pageSize + pageSize);
 
-  function toggleSort(key: SortKey) {
+  function toggleSort(key: string) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -169,12 +164,35 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
     setPage(0);
   }
 
+  /**
+   * Cell renderer that dispatches on `col.chip`:
+   *  - `chip: "status"` renders a colour-coded Badge (Resolved → success,
+   *    New/Under → warning, else muted).
+   *  - `chip: "yesNo"` renders a yes/No Badge (Yes → default, else muted).
+   *  - Undefined renders plain text. The numeric right-align flag still
+   *    flows through the parent <TableCell>'s className.
+   */
+  function renderCell(
+    col: { key: string; chip?: "yesNo" | "status" },
+    r: DynamicRecord,
+  ) {
+    const v = valueFor(r, col.key);
+    const display = v == null || v === "" ? "—" : String(v);
+    if (col.chip === "status") {
+      return <Badge variant={statusVariant(v)}>{display}</Badge>;
+    }
+    if (col.chip === "yesNo") {
+      return <Badge variant={yesNoVariant(v)}>{display}</Badge>;
+    }
+    return display;
+  }
+
   return (
     <Card className="overflow-hidden">
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <CardTitle>Feedback records</CardTitle>
+            <CardTitle>Records</CardTitle>
             <p className="mt-1 text-xs text-cordaid-muted">
               {sortedRows.length === tableRows.length ? (
                 <>
@@ -218,7 +236,7 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
           <Table>
             <TableHeader className="sticky top-0 z-10">
               <TableRow>
-                {COLUMNS.map((col) => {
+                {columns.map((col) => {
                   const Icon =
                     sortKey === col.key
                       ? sortDir === "asc"
@@ -226,14 +244,17 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
                         : ArrowDown
                       : ArrowUpDown;
                   return (
-                    <TableHead key={col.key} className={cn(col.align === "right" && "text-right")}>
+                    <TableHead
+                      key={col.key}
+                      className={cn(col.align === "right" && "text-right")}
+                    >
                       <button
                         type="button"
                         onClick={() => toggleSort(col.key)}
                         className={cn(
                           "inline-flex items-center gap-1.5 uppercase tracking-wide text-[11px] font-semibold",
                           "hover:text-cordaid-dark transition-colors",
-                          col.align === "right" && "flex-row-reverse"
+                          col.align === "right" && "flex-row-reverse",
                         )}
                       >
                         {col.label}
@@ -242,16 +263,13 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
                     </TableHead>
                   );
                 })}
-                <TableHead className="w-[120px] text-right uppercase tracking-wide text-[11px] font-semibold">
-                  Emergency
-                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {pageRows.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={COLUMNS.length + 1}
+                    colSpan={columns.length}
                     className="px-6 py-10 text-center text-cordaid-muted"
                   >
                     {records.length === 0 ? (
@@ -277,9 +295,7 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
                         </button>
                       </span>
                     ) : (
-                      <span>
-                        Sort or paginate to view more feedback rows.
-                      </span>
+                      <span>Sort or paginate to view more feedback rows.</span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -290,28 +306,22 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
                   onClick={() => onSelect(r)}
                   className="cursor-pointer"
                 >
-                  <TableCell className="font-medium tabular-nums whitespace-nowrap">
-                    {r.Date ?? "—"}
-                  </TableCell>
-                  <TableCell className="max-w-[180px] truncate">{r["Project related to feedback"] ?? "—"}</TableCell>
-                  <TableCell>{r.District ?? "—"}</TableCell>
-                  <TableCell>{r["Feedback Category"] ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusVariant(r["Status of this feedback"])}>
-                      {r["Status of this feedback"] ?? "—"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{r.Gender ?? "—"}</TableCell>
-                  <TableCell className="text-right tabular-nums">{r.Age ?? "—"}</TableCell>
-                  <TableCell className="max-w-[180px] truncate">{r["Referral Status"] ?? "—"}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {r["Days taken to resolved this feedback"] ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Badge variant={emergencyVariant(r["Emergency Feedback"])}>
-                      {r["Emergency Feedback"] ?? "—"}
-                    </Badge>
-                  </TableCell>
+                  {columns.map((col) => (
+                    <TableCell
+                      key={col.key}
+                      className={cn(
+                        col.align === "right" && "text-right tabular-nums",
+                        // Truncate long free-text columns so the table
+                        // stays readable when an enterprise-list / long
+                        // description value would otherwise stretch.
+                        col.chip == null &&
+                          typeof r[col.key] === "string" &&
+                          "max-w-[220px] truncate",
+                      )}
+                    >
+                      {renderCell(col, r)}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
             </TableBody>

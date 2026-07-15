@@ -158,6 +158,25 @@ export interface TableColumnDef {
   /** Header text. */
   label: string;
   align?: "left" | "right";
+  /**
+   * Optional chip decoration for cell rendering. Step 9's
+   * feedback-table.tsx dispatches on this field to wrap the cell
+   * in a colour-coded Badge rather than rendering plain text.
+   *
+   * - `"status"` — for any select_one column with values like
+   *   "New / Under investigation / Resolved & closed". The renderer
+   *   derives a Badge variant from `.includes()` matches against
+   *   the resolved/under-investigation substrings.
+   * - `"yesNo"` — for boolean-style yes/no columns (e.g.
+   *   `Emergency Feedback`). The renderer picks the red-yes
+   *   default variant for "Yes" and muted otherwise.
+   *
+   * Undefined renders the cell as plain text. New forms can leave
+   * `chip` off any column that doesn't want badge styling; WeWork
+   * currently declares none, so the table renders plain text for
+   * all 10 of its columns.
+   */
+  chip?: "yesNo" | "status";
 }
 
 /**
