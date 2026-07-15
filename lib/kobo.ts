@@ -31,20 +31,42 @@ export interface KoboFormMeta {
   uid: string;
   name: string;
   version: string | undefined;
-  /** Map of Kobo `name` attribute → dashboard `label` heading. */
+  /**
+   * Map of raw Kobo record key (group-prefixed path or bare name) →
+   * dashboard label heading. Keys are the EXACT field names Kobo
+   * persists in the response (`basic_information/current_district`,
+   * `gender`, `eligibility/score_age` …) so normalizeSubmission's
+   * `meta.nameToLabel[k] ?? k` lookup resolves directly. Pre-fix
+   * keys were bare names only — that worked when the form had no
+   * `begin_group` markers (Cordaid) but silently broke for grouped
+   * forms (Wework) where the raw record carries the group prefix
+   * (`basic_information/current_district`) but the survey row was
+   * bare (`current_district`). See DASHPLUS_PLAN.md §6 Note 3.
+   */
   nameToLabel: Record<string, string>;
-  /** Labels for questions typed as `integer` (so we coerce to number). */
+  /** Post-rename labels for questions typed as `integer` (so we coerce to number). */
   integerLabels: Set<string>;
-  /** Labels for questions typed as `date` (so we validate YYYY-MM-DD). */
+  /** Post-rename labels for questions typed as `date` (so we validate YYYY-MM-DD). */
   dateLabels: Set<string>;
   /**
-   * Per-question slug → label lookup. Keys are Kobo `name` attributes, values
-   * are `{choice_slug: choice_label}` tables. Used during normalisation to
-   * rewrite select_one stored values (which Kobo persists as slugs like
-   * `kabale`) back to the human-readable labels that the dashboard's filters,
-   * KPIs, and chart axes already operate on.
+   * Per-question slug → label lookup. Keys are raw record keys
+   * (group-prefixed path) so the normalizeSubmission's loop reads
+   * `meta.valueNameToLabel[rawRecordKey]` and looks up the
+   * survey-row's choice-list map keyed by `list_name` (falling
+   * back to the type-suffix and inline `q.choices`).
    */
   valueNameToLabel: Record<string, Record<string, string>>;
+  /**
+   * How many leaf rows the walker walked in this form's schema.
+   * `surveyRowsLabeled` is the subset that carried a non-empty
+   * `label` — the ones the dashboard actually uses to rename
+   * record keys. When labelled count is zero the walker ran but
+   * shipped an empty `nameToLabel`, the route surfaces this as
+   * `meta.warning` so operators can distinguish "schema walked"
+   * (silent empty result) from "Kobo unreached" (route errors out).
+   */
+  surveyRowsObserved: number;
+  surveyRowsLabeled: number;
 }
 
 export interface KoboFetchResult {
@@ -55,6 +77,14 @@ export interface KoboFetchResult {
   fetchedAt: string;
   truncated: boolean;
   totalCount: number | null;
+  /**
+   * Diagnostic counters from the schema fetch. Underscore prefix
+   * signals "diagnostic only; not consumed by chart/filter/KPI
+   * closures". Read by `app/api/feedback/route.ts` to decide whether
+   * to surface `meta.warning` when schema fetch silently returned
+   * empty labels (DASHPLUS Lesson 3 guardrail).
+   */
+  _schemaSummary?: { observed: number; labeled: number };
 }
 
 const MAX_PAGES = 50;
@@ -160,7 +190,15 @@ export async function fetchKoboFormMeta(
   config: KoboConfig,
   options: KoboFetchOptions = {}
 ): Promise<KoboFormMeta> {
-  const url = `${normalizeBaseUrl(config.baseUrl)}/api/v2/assets/${config.assetUid}/`;
+  // Kobo's structured-schema endpoint. Pre-fix we hit the asset-
+  // metadata endpoint `${baseUrl}/api/v2/assets/${uid}/` which only
+  // advertises `data.content = ["schema","survey","choices",...]`
+  // (an ARRAY of export-format strings, not a dict of sheets) — so
+  // EVERY walker fallback returned `[]` and `nameToLabel`/`valueNameToLabel`
+  // silently came back empty. Switching to `/content/` returns the
+  // sheets under top-level `data.survey` + `data.choices`. See
+  // DASHPLUS_PLAN.md §6 Note 3 lesson B.
+  const url = `${normalizeBaseUrl(config.baseUrl)}/api/v2/assets/${config.assetUid}/content/`;
   const res = await authedFetch(url, config.token, options.signal);
   const data = await res.json();
 
@@ -169,27 +207,52 @@ export async function fetchKoboFormMeta(
   const dateLabels = new Set<string>();
   const valueNameToLabel: Record<string, Record<string, string>> = {};
   const byListName: Record<string, Record<string, string>> = {};
+  let surveyRowsObserved = 0;
+  let surveyRowsLabeled = 0;
 
-  // KPI v2 puts the XLSForm survey and choices sheets under
-  // `data.content.survey` and `data.content.choices` as arrays of row
-  // objects; some deployments expose them as top-level `data.survey` /
-  // `data.choices` instead. Honour both shapes so the transformer survives
-  // deployment-version drift. (Earlier revisions of this code walked
-  // `data.content` directly, but it's actually a DICT whose values are the
-  // sheet arrays, not a flat list of question objects — that's why label
-  // lookups were silently empty and every record came back null.)
+  // Three probe paths so the walker survives both endpoint shapes
+  // AND a bracket-character that LOOKS LIKE the same shape but
+  // isn't (the local var `data` shadows the JSON key `data` — the
+  // survey sheets live at res.data.survey which is positional 2):
+  //   1. /api/v2/assets/{uid}/content/ → the inner `data` wrapper
+  //      holds survey/choices/settings sheets (res.data.survey).
+  //      This is the working path on kf.kobotoolbox.org today.
+  //   2. Old KPI v2 deployments exposed sheets via `content` dict
+  //      (res.content.survey).
+  //   3. Last-ditch fallback for any unexpected top-level survey
+  //      (res.survey) so older bugs don't regress.
+  // The pre-fix walker only used paths 2 + 3, both of which miss
+  // on the /content/ endpoint — the walker ran but `surveyList`
+  // resolved to `[]`, no rows registered into `nameToLabel`, and
+  // every record cell came back as the raw snake_case path. This
+  // three-tier probe mirrors DASHPLUS_PLAN.md §3 Hard rule #3
+  // (always check both shapes) extended with the inner wrapper.
   const content =
     data && typeof data === "object"
       ? ((data as Record<string, unknown>).content as
           | Record<string, unknown>
           | null)
       : null;
-  const surveyList: Array<Record<string, unknown>> = Array.isArray(content?.survey)
+  const innerSheets =
+    data && typeof data === "object"
+      ? ((data as Record<string, unknown>).data as
+          | Record<string, unknown>
+          | null)
+      : null;
+  const surveyList: Array<Record<string, unknown>> = Array.isArray(
+    innerSheets?.survey
+  )
+    ? (innerSheets!.survey as Array<Record<string, unknown>>)
+    : Array.isArray(content?.survey)
     ? (content!.survey as Array<Record<string, unknown>>)
     : Array.isArray(data?.survey)
     ? (data.survey as Array<Record<string, unknown>>)
     : [];
-  const choicesList: Array<Record<string, unknown>> = Array.isArray(content?.choices)
+  const choicesList: Array<Record<string, unknown>> = Array.isArray(
+    innerSheets?.choices
+  )
+    ? (innerSheets!.choices as Array<Record<string, unknown>>)
+    : Array.isArray(content?.choices)
     ? (content!.choices as Array<Record<string, unknown>>)
     : Array.isArray(data?.choices)
     ? (data.choices as Array<Record<string, unknown>>)
@@ -211,24 +274,70 @@ export async function fetchKoboFormMeta(
 
   // Pass 2: walk the survey sheet to build name→label plus integer/date
   // tags, then wire each select_* question to the value-map we just built.
+  // KPI v2 emits groups as FLAT SIBLING MARKERS (`begin_group` row with a
+  // `name: "demographics"`, then leaf rows underneath, then `end_group`),
+  // not as a `children[]` nested tree. We stack group names as we walk and
+  // prepend the joined path to each leaf's `name` so the key in
+  // `nameToLabel` matches the GROUP-PREFIXED KEY Kobo persists in the
+  // response (e.g. `basic_information/current_district`). Without this,
+  // lookup `meta.nameToLabel["basic_information/current_district"]` misses
+  // because walker registered `meta.nameToLabel["current_district"]`.
+  const groupStack: string[] = [];
   for (const q of surveyList) {
     if (!q || typeof q !== "object") continue;
-    const name = (q as Record<string, unknown>).name;
-    if (typeof name !== "string" || !name) continue;
-    const lbl = extractLabel((q as Record<string, unknown>).label);
-    if (!lbl) continue;
-    nameToLabel[name] = lbl;
     const rawType = (q as Record<string, unknown>).type;
-    const t = typeof rawType === "string" ? rawType.split(" ", 1)[0] : ""; // strip `select_one foo` to `select_one`
-    const after =
-      typeof rawType === "string" ? rawType.slice(t.length).trim() : "";
-    if (t === "integer") integerLabels.add(lbl);
-    else if (t === "date") dateLabels.add(lbl);
+    const t = typeof rawType === "string" ? rawType.split(" ", 1)[0] : "";
+    const name = (q as Record<string, unknown>).name;
+    const isGroupMarker =
+      typeof rawType === "string" &&
+      (rawType === "begin_group" ||
+        rawType === "end_group" ||
+        rawType.startsWith("begin ") ||
+        rawType.startsWith("end "));
+    if (isGroupMarker) {
+      if (rawType === "end_group" || rawType.startsWith("end ")) {
+        if (groupStack.length) groupStack.pop();
+      } else if (typeof name === "string" && name) {
+        groupStack.push(name);
+      }
+      continue;
+    }
+    if (typeof name !== "string" || !name) continue;
+    surveyRowsObserved++;
+    const path = groupStack.length ? `${groupStack.join("/")}/${name}` : name;
+    const lbl = extractLabel((q as Record<string, unknown>).label);
+    // Two-tier registration:
+    //   - labelled leaves → register the raw group-prefixed path mapped
+    //     to the dashboard label (so a record's "District" cell comes
+    //     from `r["basic_information/current_district"] === "arua"`).
+    //   - unlabelled leaves (typically `score_*` calculate fields and
+    //     Kobo metadata rows) → keep the bare survey `name` so Wework
+    //     consumers can keep referencing `r.score_age` cleanly without
+    //     dragging the `eligibility/` prefix into every accessor.
+    //
+    // Then a SINGLE post-registration block applies the integer /
+    // calculate / date coercion so calculate fields (Wework's
+    // `score_age`, `score_gender`, `score_vuln`) get coerced to
+    // numbers — previously the walker only coerced `type: integer`,
+    // and Kobo serialises calculate results as numeric strings
+    // (`"5"`) so `typeof r.score_age === "number"` returned false
+    // and `compositeScore` returned null, regressing Wework's
+    // headline KPI to 0.0.
+    const registeredKey = lbl || name;
+    nameToLabel[path] = registeredKey;
+    if (lbl) surveyRowsLabeled++;
+    if (t === "integer" || t === "calculate") {
+      integerLabels.add(registeredKey);
+    } else if (t === "date") {
+      dateLabels.add(registeredKey);
+    }
     // select_one / select_multiple: the value-map comes from the choices
     // sheet via `list_name` matching the question type suffix. Some
     // deployments also inline `q.choices` per question — honour it as a
     // secondary source if the choices sheet didn't provide one.
     if (t === "select_one" || t === "select_multiple") {
+      const after =
+        typeof rawType === "string" ? rawType.slice(t.length).trim() : "";
       // Primary cross-reference: KPI v2 groups choices by `list_name`
       // whose value most forms keep in sync with the survey row's `name`
       // (e.g. survey `name: gender` ↔ choices with `list_name: gender`).
@@ -240,8 +349,8 @@ export async function fetchKoboFormMeta(
       // written against).
       let map = byListName[name];
       if (!map && after) map = byListName[after];
-      if (map && Object.keys(map).length) valueNameToLabel[name] = map;
-      if (!valueNameToLabel[name]) {
+      if (map && Object.keys(map).length) valueNameToLabel[path] = map;
+      if (!valueNameToLabel[path]) {
         const inline = (q as Record<string, unknown>).choices;
         if (Array.isArray(inline)) {
           const inlineMap: Record<string, string> = {};
@@ -254,7 +363,7 @@ export async function fetchKoboFormMeta(
             }
           }
           if (Object.keys(inlineMap).length)
-            valueNameToLabel[name] = inlineMap;
+            valueNameToLabel[path] = inlineMap;
         }
       }
     }
@@ -268,6 +377,8 @@ export async function fetchKoboFormMeta(
     integerLabels,
     dateLabels,
     valueNameToLabel,
+    surveyRowsObserved,
+    surveyRowsLabeled,
   };
 }
 
@@ -410,5 +521,13 @@ export async function fetchKoboSubmissions(
     fetchedAt: new Date().toISOString(),
     truncated,
     totalCount,
+    // Carry the schema counters via a private annotation so the route
+    // can decide whether to surface meta.warning without lifting them
+    // into KoboFetchResult's public surface (which would itself need
+    // to widen consumers' types). See app/api/feedback/route.ts.
+    _schemaSummary: {
+      observed: meta.surveyRowsObserved,
+      labeled: meta.surveyRowsLabeled,
+    },
   };
 }

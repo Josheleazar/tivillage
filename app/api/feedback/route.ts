@@ -114,6 +114,31 @@ export async function GET(req: Request) {
         truncated: result.truncated,
         totalCount: result.totalCount ?? undefined,
       };
+      // Lesson 3 guardrail (DASHPLUS_PLAN.md §3): when the schema walker
+      // observes rows but registers NONE with a label, the rename is a
+      // silent no-op and every record's "District" / "Gender" / etc.
+      // cell comes back as the snake_case key with the raw Kobo slug.
+      // Surface that as a top-level `meta.warning` so the dashboard's
+      // source-chip can render it beneath the source label rather than
+      // masquerading as an empty-data state. Also flag when zero rows
+      // were observed at all (likely a permission/asset-deletion issue).
+      const observed = result._schemaSummary?.observed ?? null;
+      const labeled = result._schemaSummary?.labeled ?? null;
+      if (observed !== null && labeled !== null) {
+        if (observed === 0) {
+          meta.warning =
+            `Schema fetch returned no survey rows for ${form.label}; ` +
+            "records will render with raw Kobo keys and slug values.";
+        } else if (labeled === 0) {
+          meta.warning =
+            `Schema fetch observed ${observed} survey rows but none carried a label; ` +
+            "records will render with raw Kobo keys and slug values.";
+        } else if (labeled < observed * 0.25) {
+          meta.warning =
+            `Schema fetch only labelled ${labeled}/${observed} survey rows; ` +
+            "many record fields may render as raw Kobo keys.";
+        }
+      }
       return NextResponse.json(
         {
           count: result.records.length,

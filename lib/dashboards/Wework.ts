@@ -4,23 +4,28 @@ import type { DynamicRecord, FormConfig } from "@/lib/types";
 //  Wework FormConfig — beneficiary-selection form for the WeWork
 //  entrepreneurship screening programme.
 //
-//  Survey fields of interest (from wework.xlsx survey sheet):
-//    businesstype       select_one:  Start-up | Existing
-//    gender             select_one:  Male | Female
-//    vuln               select_one:  Teenage mother | PLWD |
-//                                   Lactating mother | None
-//    status             select_one:  Refugee | Host community
-//    enterprise         select_multiple: Tomatoes | Onions | Poultry |
-//                                   Apairy | …
-//    score_age          integer (calculate)
-//    score_gender       integer (calculate)
-//    score_vuln         integer (calculate)
-//    age                integer (18–35 range validation)
-//    district           select_one:  Arua | Terego | Yumbe
+//  KEY CONVENTION (post-fix — see DASHPLUS_PLAN.md §6 Note 3 lesson B):
+//  Wework's KPI v2 schema carries GROUP-PREFIXED KEYS (e.g.
+//  `basic_information/current_district`, `demographics/gender`,
+//  `stage/district`) in the raw submission response. After
+//  `lib/kobo.ts:fetchKoboFormMeta` walks the schema sheet (URL:
+//  `/api/v2/assets/{uid}/content/`) and tracks `begin_group`/
+//  `end_group` markers, every leaf registers into `nameToLabel`
+//  with a key matching the raw record path mapped to the schema's
+//  `label`. So:
 //
-//  No `Date` field exists — date bounds + trend chart read from
-//  `_submission_time`. envPrefix=WEWORK_KOBO so the route's resolution
-//  chain reads WEWORK_KOBO_ASSET_UID_DEV (or _ASSET_UID in prod).
+//    raw record key (`basic_information/current_district`) →
+//      post-rename cell key (`District`),
+//    raw record key (`demographics/gender`) →
+//      post-rename cell key (`Gender of applicant`),
+//    raw record key (`eligibility/age`) →
+//      post-rename cell key (`What is your age?`),
+//    and so on.
+//
+//  Score / calculate fields (e.g. `score_age`) have NO schema
+//  label. The walker falls back to the BARE survey `name` for
+//  those, so `r.score_age` continues to resolve (rather than
+//  `r["eligibility/score_age"]`). That asymmetry is intentional.
 // =============================================================================
 
 function countWhere(
@@ -66,6 +71,9 @@ function uniqueCount(
 }
 
 function compositeScore(r: DynamicRecord): number | null {
+  // score_* are calculate fields WITHOUT a schema label, so the
+  // walker preserves the bare survey name (no prefix) — see
+  // comment block above. These three references stay lowercase.
   const a = typeof r.score_age === "number" ? r.score_age : null;
   const g = typeof r.score_gender === "number" ? r.score_gender : null;
   const v = typeof r.score_vuln === "number" ? r.score_vuln : null;
@@ -73,41 +81,57 @@ function compositeScore(r: DynamicRecord): number | null {
   return (a ?? 0) + (g ?? 0) + (v ?? 0);
 }
 
+// Schema-resolved label keys (the EXACT strings the walker registers
+// into nameToLabel). Pull these out as constants so the rest of the
+// file reads naturally even though they're long full-question keys.
+// If the Wework form schema ever changes these labels, ONLY this
+// block needs an edit; the closures below stay byte-identical.
+const LBL_DISTRICT = "District";
+const LBL_GENDER = "Gender of applicant";
+const LBL_BUSINESS_TYPE = "Are you a start-up or an existing business?";
+const LBL_VULNERABILITY =
+  "Select vulnerability (Teenage mother, PLWD, Lactating mother)";
+const LBL_STATUS = "Are you Refugee or Host community?";
+const LBL_ENTERPRISE =
+  "If yes, which of the following value chain or enterprises is business focusing on?";
+const LBL_AGE = "What is your age?";
+
 export const Wework: FormConfig = {
   id: "Wework",
   label: "Wework",
   envPrefix: "WEWORK_KOBO",
-  // No `Date` field in the survey; bound defaults hydrate from
-  // `_submission_time` so trend chart + date filters read consistent
-  // values.
+  // No "Date" question in the survey; bound defaults hydrate from
+  // `_submission_time` so the trend chart + date filters read
+  // consistent values.
   dateColumn: "_submission_time",
   // Free-text search spans the pickable, label-shaped columns of the
-  // WeWork form. Kobo metadata fields (_id/_uuid/_submission_time)
-  // are excluded so search hits feel semantic rather than numeric.
+  // WeWork form after the post-rename rewrite. Kobo metadata fields
+  // (_id/_uuid/_submission_time) are excluded so search hits feel
+  // semantic rather than numeric.
   searchFields: [
-    "district",
-    "gender",
-    "businesstype",
-    "vuln",
-    "status",
-    "enterprise",
+    LBL_DISTRICT,
+    LBL_GENDER,
+    LBL_BUSINESS_TYPE,
+    LBL_VULNERABILITY,
+    LBL_STATUS,
+    LBL_ENTERPRISE,
   ],
-  // 7 widgets — mirrors the Cordaid 13-widget list but pared back to
-  // the WeWork-relevant axes. Date inputs read from `_submission_time`
-  // (handled by filter-bar.tsx once Step 8 takes over from FILTER_DEFS).
+  // 8 widgets — mirrors the Cordaid 13-widget list but pared back to
+  // the WeWork-relevant axes. Date inputs read from `_submission_time`.
   filters: [
-    { key: "district", label: "District", type: "select", sourceColumn: "district" },
-    { key: "gender", label: "Gender", type: "select", sourceColumn: "gender" },
-    { key: "businesstype", label: "Business type", type: "select", sourceColumn: "businesstype" },
-    { key: "vuln", label: "Vulnerability", type: "select", sourceColumn: "vuln" },
-    { key: "status", label: "Status", type: "select", sourceColumn: "status" },
+    { key: "district", label: "District", type: "select", sourceColumn: LBL_DISTRICT },
+    { key: "gender", label: "Gender", type: "select", sourceColumn: LBL_GENDER },
+    { key: "businesstype", label: "Business type", type: "select", sourceColumn: LBL_BUSINESS_TYPE },
+    { key: "vuln", label: "Vulnerability", type: "select", sourceColumn: LBL_VULNERABILITY },
+    { key: "status", label: "Status", type: "select", sourceColumn: LBL_STATUS },
     { key: "startDate", label: "Start date", type: "date" },
     { key: "endDate", label: "End date", type: "date" },
     { key: "search", label: "Search text", type: "search", span: 2 },
   ],
-  // 6 tiles aligned with screening outreach reporting. `vulnerable`
-  // counts applicants whose vul != 'None', matching the WeWork
-  // programme's primary outreach axis.
+  // 7 tiles aligned with screening outreach reporting. `vulnerable`
+  // counts applicants whose vulnerability label != "None" (slug
+  // `no_vuln` from `demographics/vulnerability`'s valueMap), matching
+  // the WeWork programme's primary outreach axis.
   kpis: [
     {
       key: "total",
@@ -122,7 +146,12 @@ export const Wework: FormConfig = {
       label: "Vulnerable applicants",
       sub: (records) =>
         `${pct(
-          countWhere(records, (r) => typeof r.vuln === "string" && r.vuln !== "None"),
+          countWhere(
+            records,
+            (r) =>
+              typeof r[LBL_VULNERABILITY] === "string" &&
+              r[LBL_VULNERABILITY] !== "None",
+          ),
           records.length,
         )}% flagged`,
       iconName: "AlertTriangle",
@@ -130,7 +159,9 @@ export const Wework: FormConfig = {
       compute: (records) =>
         countWhere(
           records,
-          (r) => typeof r.vuln === "string" && r.vuln !== "None",
+          (r) =>
+            typeof r[LBL_VULNERABILITY] === "string" &&
+            r[LBL_VULNERABILITY] !== "None",
         ).toLocaleString(),
     },
     {
@@ -138,23 +169,26 @@ export const Wework: FormConfig = {
       label: "Refugee applicants",
       sub: (records) =>
         `${pct(
-          countWhere(records, (r) => r.status === "Refugee"),
+          countWhere(records, (r) => r[LBL_STATUS] === "Refugee"),
           records.length,
         )}% of filtered`,
       iconName: "Share2",
       accent: "bg-sky-50 text-sky-600",
       compute: (records) =>
-        countWhere(records, (r) => r.status === "Refugee").toLocaleString(),
+        countWhere(records, (r) => r[LBL_STATUS] === "Refugee").toLocaleString(),
     },
     {
       key: "female",
       label: "Female applicants",
       sub: (records) =>
-        `${pct(countWhere(records, (r) => r.gender === "Female"), records.length)}% of respondents`,
+        `${pct(
+          countWhere(records, (r) => r[LBL_GENDER] === "Female"),
+          records.length,
+        )}% of respondents`,
       iconName: "Users",
       accent: "bg-pink-50 text-pink-600",
       compute: (records) =>
-        countWhere(records, (r) => r.gender === "Female").toLocaleString(),
+        countWhere(records, (r) => r[LBL_GENDER] === "Female").toLocaleString(),
     },
     {
       key: "avgAge",
@@ -162,7 +196,11 @@ export const Wework: FormConfig = {
       sub: "Across filtered records",
       iconName: "CalendarDays",
       accent: "bg-violet-50 text-violet-600",
-      compute: (records) => avgNumeric(records, "age").toFixed(1),
+      // `LBL_AGE` is the post-rename cell key (col of integer
+      // values after the valueMap + integer coercion pipeline).
+      // Walker's integerLabels set includes this label so the
+      // underlying cell resolves to a number.
+      compute: (records) => avgNumeric(records, LBL_AGE).toFixed(1),
     },
     {
       key: "avgScore",
@@ -189,7 +227,7 @@ export const Wework: FormConfig = {
       sub: "Unique locations",
       iconName: "Map",
       accent: "bg-emerald-50 text-emerald-600",
-      compute: (records) => uniqueCount(records, "district").toLocaleString(),
+      compute: (records) => uniqueCount(records, LBL_DISTRICT).toLocaleString(),
     },
   ],
   // 7 charts oriented around screening segmentation. Trend chart
@@ -204,42 +242,43 @@ export const Wework: FormConfig = {
     {
       title: "By district — Top 15",
       type: "horizontal-bar",
-      sourceColumn: "district",
+      sourceColumn: LBL_DISTRICT,
       topN: 15,
     },
     {
       title: "Business type",
       type: "donut",
-      sourceColumn: "businesstype",
+      sourceColumn: LBL_BUSINESS_TYPE,
     },
     {
       title: "Vulnerability profile",
       type: "donut",
-      sourceColumn: "vuln",
+      sourceColumn: LBL_VULNERABILITY,
     },
     {
       title: "Refugee vs host",
       type: "donut",
-      sourceColumn: "status",
+      sourceColumn: LBL_STATUS,
     },
-    { title: "Gender mix", type: "donut", sourceColumn: "gender" },
+    { title: "Gender mix", type: "donut", sourceColumn: LBL_GENDER },
     {
       title: "Age distribution",
       type: "age-bar",
-      sourceColumn: "age",
+      sourceColumn: LBL_AGE,
     },
   ],
   // 10 columns surfaced in the records table — submission time,
   // geography, demographics, business profile, plus the three
-  // selection-score calculate fields for triage review.
+  // selection-score calculate fields (lowercase, no schema label).
   tableColumns: [
     { key: "_submission_time", label: "Submission time" },
-    { key: "district", label: "District" },
-    { key: "gender", label: "Gender" },
-    { key: "age", label: "Age", align: "right" },
-    { key: "businesstype", label: "Business type" },
-    { key: "vuln", label: "Vulnerability" },
-    { key: "status", label: "Status" },
+    { key: LBL_DISTRICT, label: "District" },
+    { key: LBL_GENDER, label: "Gender" },
+    { key: LBL_AGE, label: "Age", align: "right" },
+    { key: LBL_BUSINESS_TYPE, label: "Business type" },
+    { key: LBL_VULNERABILITY, label: "Vulnerability" },
+    { key: LBL_STATUS, label: "Status" },
+    // score_* calculate fields stay lowercase (no schema label).
     { key: "score_age", label: "Score: Age", align: "right" },
     { key: "score_gender", label: "Score: Gender", align: "right" },
     { key: "score_vuln", label: "Score: Vuln", align: "right" },
@@ -258,6 +297,6 @@ export const Wework: FormConfig = {
   },
   drawerHeader: {
     titleField: "_submission_time",
-    subtitleFields: ["district", "gender", "businesstype"],
+    subtitleFields: [LBL_DISTRICT, LBL_GENDER, LBL_BUSINESS_TYPE],
   },
 };

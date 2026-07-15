@@ -293,6 +293,16 @@ export interface ApiMeta {
   baseUrl?: string;
   fetchedAt?: string;
   error?: string;
+  /**
+   * Non-fatal schema-fetch warnings surfaced by lib/kobo.ts. Currently
+   * emitted when the schema walker saw survey rows but none carried a
+   * label (silent-failure mode the raw record-key rename doesn't fire,
+   * leaving every record's passthrough key as the snake_case form). The
+   * dashboard's `<source-chip>` can render this string beneath the
+   * source label so operators can tell live-Kobo schema drift from
+   * genuine empty data.
+   */
+  warning?: string;
   /** True when Kobo returned more submissions than we cap (50 pages × 1 000). */
   truncated?: boolean;
   /** Total matching rows reported by Kobo (`count` field on `/data/`). */
