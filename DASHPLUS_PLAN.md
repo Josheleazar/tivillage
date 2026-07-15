@@ -720,3 +720,105 @@ the three UX nitpicks X1–X3 are resolved.
 
 _Effective for `dashPlus`. Once #1–14 land and the ETE gate passes,
 this branch is ready to merge into `main` and ship._
+
+---
+
+## 10. Post-merge fixes on `main` (after dashPlus closed at `3b25fe5`)
+
+These landed on `main` after the dashPlus chapter merged. They are
+NOT dashPlus steps — they're standalone fix-ups surfaced by the live
+Wework deployment exposing the silent-failure mode §6 Note 3
+lesson B warned about.
+
+### 10.1 — Wework schema walker regression — DONE (commit `a8c975b`)
+
+**Symptom (verified on live Wework records post-dashPlus merge):**
+`/api/feedback?form=Wework` returned every field with the raw
+group-prefixed snake_case key (`basic_information/CURRENT_DISTRICT`,
+`demographics/gender`, `eligibility/age`, …) and raw slug values
+(`"arua"`, `"male"`, `"26"`). Every KPI tile blanked, every chart
+spec missed, the records table rendered rows of `—`. Cordaid was
+unaffected (no `begin_group` markers, no snippet of the bug's
+symptom class).
+
+**Root cause (recap of §6 Note 3 lesson B):** `fetchKoboFormMeta`
+hit `${baseUrl}/api/v2/assets/${uid}/` (asset-metadata endpoint)
+which returns `data.content = ["schema","survey","choices","settings","translated","translations"]`
+as an **ARRAY of export-format strings**, not a dict of sheets.
+Both fallback probes (`data.content?.survey` and `data?.survey`)
+missed because the real sheets live at
+`${baseUrl}/api/v2/assets/${uid}/content/` → `{kind, uid_asset,
+data: {survey, choices, settings, …}}` two levels deeper. Result:
+`nameToLabel` empty, `valueNameToLabel` empty, the normalize line
+`meta.nameToLabel[k] ?? k` returned the raw record key for every
+field, dashboard closure fields all `undefined`.
+
+**The fix (one commit, 4 files, 283 insertions / 90 deletions):**
+
+- `lib/kobo.ts` — URL switched to `/content/`. Sheet extraction
+  three-tier: `data.data?.survey/choices` primary (inner wrapper),
+  `data.content?.survey/choices` legacy fallback (older KPI v2
+  deployments), `data?.survey/choices` last-ditch. Walker added
+  flat-sibling `begin_group`/`end_group` stack tracking so each
+  leaf registers under the GROUP-PREFIXED raw record path
+  matching what Kobo persists (`basic_information/current_district`
+  → `District`). `nameToLabel[path] = label` for labelled leaves,
+  `nameToLabel[path] = name` for unlabelled leaves (calculate
+  fields like `score_*` keep bare names so consumers can still
+  reference `r.score_age` cleanly without the `eligibility/`
+  prefix). Integer coercion extended to `t === "calculate"`
+  (Kobo serialises calculate results as numeric strings `"5"` and
+  without coercion `compositeScore` returned null, regressing
+  Wework's headline selection-score KPI to 0.0).
+  `KoboFormMeta.surveyRowsObserved/Labeled` + `KoboFetchResult._schemaSummary`
+  added so the route can surface `meta.warning` on the silent
+  schema-failure mode.
+- `lib/types.ts` — `ApiMeta.warning?: string` field added with
+  doc comment on when it's emitted.
+- `app/api/feedback/route.ts` — Reads `result._schemaSummary?.observed/labeled`
+  directly (no more `(result as unknown as {...})` cast) and sets
+  `meta.warning` on `observed === 0` / `labeled === 0` / labeled
+  ratio < 0.25. Surfaces as top-level so the dashboard's
+  source-chip can render it beneath the source label.
+- `lib/dashboards/Wework.ts` — Full rewrite. Every lowercase
+  key reference swapped to the post-rename label key matching
+  what `nameToLabel` produces (`r.district` → `r["District"]`,
+  `r.gender` → `r["Gender of applicant"]`, `r.businesstype` →
+  `r["Are you a start-up or an existing business?"]`, etc.). All
+  post-rename keys centralised as `LBL_*` constants at the top
+  of the file so a future schema edit only updates ONE block.
+  `score_*` calculate fields stay lowercase.
+
+**Verification (post-fix smoke on `/api/feedback` for both forms):**
+
+- `pnpm typecheck` → `tsc --noEmit`, exit 0.
+- `?form=cordaidDemo`: `[kobo:diag]` reported 22 observed / 22
+  labelled (`nameToLabelKeys=6` first 6 sampled). Records arrive
+  with all 22 label-shaped cells populated (e.g. `"District":
+  "Kampala"`, `"Gender": "Male"`, `"Emergency Feedback": "Yes"`,
+  `"Who is giving feedback?": "Josh"`). `meta.warning = None`.
+  KPI values + record counts unchanged from pre-fix Cordaid
+  view → runtime parity held.
+- `?form=Wework`: `[kobo:diag]` reported 65 observed / 38 labelled
+  (the 27 unlabelled rows are calculate fields + KPI v2 metadata
+  groups). Records arrive with post-rename label keys populated:
+    - `"District"`: `"Arua"` (label, not slug)
+    - `"Gender of applicant"`: `"Male"`
+    - `"What is your age?"`: `26` (number, post-coercion)
+    - `"Are you a start-up or an existing business?"`: `"Start-up"`
+    - `"Select vulnerability (Teenage mother, PLWD, …)"`: `"None"`
+    - `"Are you Refugee or Host community?"`: `"Host community"`
+    - `score_age`, `score_gender`, `score_vuln` → `5, 5, 0`
+      (numbers, post-coercion)
+  `meta.warning = None`.
+
+**Lesson 3 guardrail recovered:** the silent-empty-map failure mode
+that lesson B warned about now surfaces as visible `meta.warning`
+instead of an all-null dashboard. DASHPLUS §3 Hard rule #1
+(no silent-empty-map) is satisfied.
+
+**Adding a third form is still one new
+`lib/dashboards/<formId>.ts` + one registry line** — zero edits
+to `detail-drawer.tsx`, `charts.tsx`, `kpi-cards.tsx`,
+`filter-bar.tsx`, `feedback-table.tsx`, OR
+`dashboard-client.tsx`.
