@@ -1,16 +1,19 @@
 # Multi-form dashboard — build plan (`dashPlus`)
 
-> **Status:** in progress on `dashPlus`. Steps 1–11 complete (Steps 7+10,
-> Step 8+9, and Step 11 each shipped in a single bundled commit because
-> each pair closes out a FeedbackRecord bridge alias with no remaining
-> per-form branching — the only outstanding step before ETE verification
-> is Step 12). `pnpm typecheck` PASS at every shipped boundary. Cordaid
-> runtime parity verified by inspection (applyFilters predicate order,
-> 13 filter widgets, 8 KPI closures, 10 CSV columns, 10 form.charts
-> specs all match cordaidDemo.ts field-for-field). Push policy is
-> unchanged: no push, branch lives locally. **Branch:** `dashPlus`
-> (already created). **Push policy:** none, per standing rule.
-> **Date:** 2026-07.
+> **Status:** Steps 1–12 complete on `dashPlus`. The LAST FeedbackRecord
+> bridge alias dies at Step 12 (commit `3a7879a`); every form-aware
+> component now consumes FormConfig + DynamicRecord directly with no
+> per-form branching anywhere in consumer files. Steps 7+10 / 8+9 / 11
+> each shipped in a single bundled commit because each pair closed out
+> one of the three remaining bridge-alias consumers with no overlap.
+> `pnpm typecheck` PASS at every shipped boundary. Cordaid runtime
+> parity verified by inspection (applyFilters predicate order, 13
+> filter widgets, 8 KPI closures, 10 CSV columns, 10 form.charts
+> specs, 4 status/yesNo chip declarations, 2 longText sections with
+> verbatim pre-Step-12 section titles all match cordaidDemo.ts field-
+> for-field). Push policy is unchanged: no push, branch lives locally.
+> **Branch:** `dashPlus` (already created). **Push policy:** none,
+> per standing rule. **Date:** 2026-07.
 
 This document locks the design for a multi-form version of the Cordaid
 feedback dashboard. The new build sits on the `dashPlus` branch and is
@@ -686,9 +689,31 @@ the three UX nitpicks X1–X3 are resolved.
   two distinct empty states (records-empty vs specs-empty). Bundles
   `lib/filters.ts` `ageDistribution` parameterization so WeWork routes
   through its snake_case `age` and Cordaid keeps `Age`.
-- Step 12 — `detail-drawer.tsx` auto-discovers fields —
-  pending. The Cell-coerced Field/StatusBadge signatures are the
-  final bridge step that gets cleaned up here.
+- **Step 12 — `detail-drawer.tsx` auto-discovers fields — DONE
+  (commit `3a7879a`).** The LAST FeedbackRecord bridge alias dies
+  here. FormConfig gains `fieldHints?: FieldHints` (status / yesNo /
+  longText dispatch declarations) and `drawerHeader?: DrawerHeaderSpec`
+  (titleField + subtitleFields); lib/filters.ts promotes
+  statusVariant + yesNoVariant to PUBLIC exports so feedback-table
+  and detail-drawer share the SAME Resolved/New/Under dispatch.
+  detail-drawer.tsx is a full rewrite iterating
+  Object.entries(record) with a two-pass ordering (tableColumns keys
+  first, then insertion-order remainder), chip dispatch via
+  per-form fieldHints, and longText sections rendering above the
+  grid with verbatim pre-Step-12 section labels preserved ("The
+  feedback" / "Actions taken"). Header summary composes from
+  drawerHeader.titleField (with "Anonymous respondent" fallback)
+  + drawerHeader.subtitleFields joined with " · ". Cordaid runtime
+  parity verified: title, subtitle, longText section titles, status
+  badge + icon-only emergency badge + id badge all render at the
+  same positions as the pre-Step-12 hardcoded layout. WeWork
+  viability: drawerHeader.titleField="_submission_time" + 3-field
+  subtitle compose a coherent header without a respondent-name
+  field, every grid cell renders as plain text (no chip fields
+  declared), and the trailing Submission-ID + Copy-UUID section
+  is the only footer chrome (pre-Step-12's decorative icon badge
+  row collapsed because the redundant chrome was a footgun for
+  any form lacking those specific keys).
 - Step 13 — End-to-end verification — pending (final typecheck +
   browser smoke).
 - Step 14 — Final housekeeping, no push — pending.
