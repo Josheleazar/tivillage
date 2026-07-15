@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Charts } from "@/components/dashboard/charts";
 import { DashboardHeader } from "@/components/dashboard/header";
@@ -67,6 +67,59 @@ export function DashboardClient() {
   const [filters, setFilters] = useState<Filters | null>(null);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<DynamicRecord | null>(null);
+  // Operator-driven refresh state. `isRefreshing` mirrors the
+  // POST window + 3-second cooldown. `refreshCounter` appends to
+  // the loader effect's dependency array so a manual refresh
+  // re-runs the same load() pipeline that form switches /
+  // dateColumn changes already trigger.
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshCounter, setRefreshCounter] = useState(0);
+  // Refs gate the click race — React batches state updates,
+  // so two clicks dispatched in the same animation frame both
+  // see the captured `isRefreshing === false` from the
+  // useCallback closure and would otherwise both fire POST +
+  // both bump the counter. The ref flips synchronously on click
+  // and is the actual source of truth, with React state following
+  // for the UI spinner. Also tracks the cooldown timer so an
+  // unmount mid-cooldown doesn't leak setState into a dead tree.
+  const refreshInFlightRef = useRef(false);
+  // `window.setTimeout` returns number in browser context; using
+  // `number` here (vs. `ReturnType<typeof setTimeout>`) keeps the
+  // typecheck happy under the `@types/node` global setTimeout
+  // overload that resolves to NodeJS.Timeout.
+  const cooldownTimerRef = useRef<number | null>(null);
+  // Cleanup the cooldown timer on unmount (route change, page
+  // nav away mid-cooldown). React 18 swallows setState-on-
+  // unmount warnings but it still leaks the timer; this
+  // normalises the cleanup path so route.c stays clean.
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current) {
+        clearTimeout(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+    };
+  }, []);
+  // Reset the cooldown when the operator switches forms mid-
+  // refresh. Without this, clicking Refresh on form A and then
+  // switching to form B within the 3 s window would leave B's
+  // button disabled with "Refreshing…" text even though B was
+  // never refreshed. Functionally harmless, but confusing.
+  //
+  // GUARDED: if a refresh is still mid-POST (ref-guard is true),
+  // the original POST's finally block will queue its own timer +
+  // reset state naturally once it resolves. Clobbering here
+  // would fire a stale-timer race: refresher A's first setTimeout
+  // fires while refresher B's second POST is still in flight,
+  // calling setIsRefreshing(false) on B's live state.
+  useEffect(() => {
+    if (refreshInFlightRef.current) return;
+    if (cooldownTimerRef.current) {
+      clearTimeout(cooldownTimerRef.current);
+      cooldownTimerRef.current = null;
+    }
+    setIsRefreshing(false);
+  }, [formKey]);
 
   // Reactive document title per D9. SSR renders without this effect
   // (returns the static title in app/layout.tsx); the effect flips the
@@ -122,7 +175,7 @@ export function DashboardClient() {
     return () => {
       cancelled = true;
     };
-  }, [formKey, form.dateColumn]);
+  }, [formKey, form.dateColumn, refreshCounter]);
 
   // Step-7: lib/filters.ts now consumes DynamicRecord[] natively (no more
   // `as unknown as FeedbackRecord[]` bridge). `applyFilters(records,
@@ -158,6 +211,53 @@ export function DashboardClient() {
       toCsv(filtered, form),
     );
   }
+
+  // Operator-driven refresh. POSTs /api/feedback/refresh which
+  // revalidateTags kobo-<formId>; bumping refreshCounter then re-
+  // runs the loader effect's load() so the next /api/feedback hit
+  // regenerates from Kobo (the sibling route's cache slot is now
+  // cold). The 3-second cooldown gates the button so a single
+  // operator click can't hammer Kobo behind the scenes while the
+  // first regeneration is still in flight.
+  const handleRefresh = useCallback(async () => {
+    // Ref-guard the click race. React batches state updates, so a
+    // second click dispatched in the same animation frame would
+    // still see the captured `isRefreshing === false` from the
+    // useCallback closure if we relied on the React state alone.
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    setIsRefreshing(true);
+    try {
+      await fetch(
+        `/api/feedback/refresh?form=${encodeURIComponent(formKey)}`,
+        { method: "POST", cache: "no-store" },
+      );
+      // Always re-run the loader even if POST returned non-2xx —
+      // revalidateTag is best-effort, the worst case is a 60 s
+      // cache miss which is still cached-at-cooldown.
+      setRefreshCounter((c) => c + 1);
+    } catch {
+      // Network failure: silently swallow so the cooldown still
+      // lifts and the operator can retry. Network-tab + cached
+      // response on /api/feedback give enough signal to debug.
+    } finally {
+      cooldownTimerRef.current = window.setTimeout(() => {
+        refreshInFlightRef.current = false;
+        setIsRefreshing(false);
+        cooldownTimerRef.current = null;
+      }, 3000);
+    }
+  }, [formKey]);
+
+  // Button disabled while EITHER the POST window is open
+  // (isRefreshing) OR the loader effect is mid-regen (loading).
+  // Coalescing both avoids a stale 3-second window where the
+  // button re-enables but the next /api/feedback fetch hasn't
+  // resolved yet at 25k-record latency. While `loading` is
+  // true the header is hidden behind the Loader2 overlay, but
+  // the disabled state still has to be correct so the button
+  // doesn't briefly flicker back to enabled on remount.
+  const refreshButtonDisabled = loading || isRefreshing;
 
   // switchForm strips ALL filter params on the URL per F5b — every
   // pick hop lands on `?form=<next>` with no other query, so the URL
@@ -206,6 +306,8 @@ export function DashboardClient() {
         form={form}
         forms={forms}
         onSwitchForm={switchForm}
+        onRefresh={handleRefresh}
+        isRefreshing={refreshButtonDisabled}
       />
       <main className="container py-6 space-y-6">
         <FilterBar

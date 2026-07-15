@@ -1,5 +1,6 @@
-import { Activity, Database } from "lucide-react";
+import { Activity, Database, Loader2, RefreshCw } from "lucide-react";
 import type { ApiMeta, DynamicRecord, FormConfig } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { SourceChip } from "./source-chip";
 import { FormPicker } from "./form-picker";
 
@@ -20,6 +21,14 @@ interface HeaderProps {
   // different form in the picker; the parent strips all filter params
   // and re-issues the fetch.
   onSwitchForm: (formId: string) => void;
+  // Operator-driven refresh. Wired up to dashboard-client.tsx's
+  // handleRefresh which POSTs /api/feedback/refresh to
+  // revalidateTag(kobo-<formId>) and then re-runs the loader.
+  onRefresh: () => void;
+  // Cooldown/spinner state for the refresh button. True from the
+  // moment the operator clicks until the parent lifts the cooldown
+  // (~3 s after the POST + reload completes).
+  isRefreshing: boolean;
 }
 
 export function DashboardHeader({
@@ -28,6 +37,8 @@ export function DashboardHeader({
   form,
   forms,
   onSwitchForm,
+  onRefresh,
+  isRefreshing,
 }: HeaderProps) {
   const dates = records
     .map((r) => r[form.dateColumn])
@@ -63,11 +74,40 @@ export function DashboardHeader({
               current={form}
               onSelect={onSwitchForm}
             />
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold backdrop-blur-sm">
-              <Database className="h-4 w-4" />
-              <span>
-                {records.length.toLocaleString()} records
-              </span>
+            <div className="inline-flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold backdrop-blur-sm">
+                <Database className="h-4 w-4" />
+                <span>
+                  {records.length.toLocaleString()} records
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={isRefreshing}
+                aria-label={
+                  isRefreshing ? "Refreshing data" : "Refresh data from Kobo"
+                }
+                title={
+                  isRefreshing
+                    ? "Refreshing data…"
+                    : "Bypass the 60s cache and pull a fresh Kobo response"
+                }
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-2 text-sm font-semibold backdrop-blur-sm transition-colors",
+                  "hover:bg-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50",
+                  "disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-white/15",
+                )}
+              >
+                {isRefreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">
+                  {isRefreshing ? "Refreshing…" : "Refresh"}
+                </span>
+              </button>
             </div>
           </div>
         </div>
