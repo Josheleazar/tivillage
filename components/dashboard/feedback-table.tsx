@@ -159,7 +159,7 @@ export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
   }
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-x-auto overflow-y-hidden">
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
