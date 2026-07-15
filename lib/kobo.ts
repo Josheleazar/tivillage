@@ -9,9 +9,16 @@
 //   - base URL: defaults to https://kf.kobotoolbox.org (Global server).
 //   - auth: `Authorization: Token <token>` header.
 //   - /data/ pagination: walks the response's `next` URL until exhausted.
-//   - hard cap at 50 pages × 1 000 rows = 50 000 rows, surfaced via
+//   - hard cap at 50 pages × 5 000 rows = 250 000 rows, surfaced via
 //     `truncated: true` + `totalCount` from the first page so the UI can
 //     flag the truncation rather than silently undercount.
+//   - page size bumped from 1 000 → 5 000 on 2026-07-15 after the
+//     25k-records-scaling discussion in chat: cuts runtime Kobo
+//     request count 5× per cache miss (50 → 10 page round-trips for
+//     a 25k-record form, ~10 s → ~2 s of upstream cost). Cap rises
+//     proportionally — a Wiork or Cordaid workload with > 50k
+//     records now gets walked without truncation; anything past
+//     250k still surfaces truncated:true.
 //   - all upstream fetches bypass Next's data cache (`cache: "no-store"`)
 //     so the route's own revalidate controls freshness.
 
@@ -88,7 +95,7 @@ export interface KoboFetchResult {
 }
 
 const MAX_PAGES = 50;
-const PAGE_SIZE = 1000;
+const PAGE_SIZE = 5000;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeBaseUrl(baseUrl: string): string {
