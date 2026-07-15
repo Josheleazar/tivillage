@@ -22,7 +22,13 @@ import {
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { FeedbackRecord } from "@/lib/types";
+import type { Cell, DynamicRecord } from "@/lib/types";
+
+// Bridge alias — Step 12 reformats detail-drawer.tsx to auto-discover
+// fields from Object.entries(record) instead of the hardcoded 24-field
+// PascalCase shape. Until then this alias keeps the pre-Step-7 prop
+// signature compileable.
+type FeedbackRecord = DynamicRecord;
 
 interface DetailDrawerProps {
   record: FeedbackRecord | null;
@@ -36,7 +42,7 @@ function Field({
   full = false,
 }: {
   label: string;
-  value: string | number | null | undefined;
+  value: Cell;
   full?: boolean;
 }) {
   return (
@@ -51,14 +57,24 @@ function Field({
   );
 }
 
-function StatusBadge({ value }: { value: string | null | undefined }) {
-  if (!value) {
+function StatusBadge({ value }: { value: Cell }) {
+  // Coerce numerics to string for the .includes() check. Kobo select_one
+  // options normalise to display labels so Cell here is overwhelmingly a
+  // string; lib/kobo.ts can leave integer responses as numbers under
+  // older deployments, hence the defensive String() coercion below.
+  const v =
+    typeof value === "string"
+      ? value
+      : value == null
+        ? ""
+        : String(value);
+  if (!v) {
     return <Badge variant="muted">—</Badge>;
   }
-  if (value.includes("Resolved")) return <Badge variant="success">{value}</Badge>;
-  if (value.includes("New") || value.includes("Under"))
-    return <Badge variant="warning">{value}</Badge>;
-  return <Badge variant="default">{value}</Badge>;
+  if (v.includes("Resolved")) return <Badge variant="success">{v}</Badge>;
+  if (v.includes("New") || v.includes("Under"))
+    return <Badge variant="warning">{v}</Badge>;
+  return <Badge variant="default">{v}</Badge>;
 }
 
 export function DetailDrawer({ record, open, onOpenChange }: DetailDrawerProps) {
@@ -66,8 +82,12 @@ export function DetailDrawer({ record, open, onOpenChange }: DetailDrawerProps) 
 
   if (!record) return null;
 
-  const description =
-    record["Description of feedback, suggestion or complaint"] ?? "";
+  // Coerce Cell → string defensively. Pre-Step-7 FeedbackRecord typed the
+  // description as `string | null`, but DynamicRecord widens it to Cell
+  // (string | number | null) which doesn't have a length property.
+  const description = String(
+    record["Description of feedback, suggestion or complaint"] ?? "",
+  );
   const descriptionShort =
     description.length > 220
       ? description.slice(0, 220).trimEnd() + "…"

@@ -4,9 +4,13 @@ import dynamic from "next/dynamic";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BRAND, CHART_PALETTE } from "@/lib/constants";
 import { useMemo } from "react";
-import type {
-  FeedbackRecord,
-} from "@/lib/types";
+import type { DynamicRecord } from "@/lib/types";
+
+// Bridge alias — Step 11 reformats charts.tsx to take a FormConfig and
+// iterate form.charts declaratively (per-spec match-on-data + render).
+// Until then this alias keeps the pre-Step-7 prop signature compileable
+// while lib/filters.ts emits DynamicRecord[].
+type FeedbackRecord = DynamicRecord;
 import {
   ageDistribution,
   countBy,
@@ -56,7 +60,10 @@ const ECOMMON = {
 };
 
 function buildLineOption(records: FeedbackRecord[]) {
-  const data = trendByDate(records);
+  // Hardcode "Date" until Step 11 reformulates Charts to walk form.charts
+  // and route config.dateColumn per-spec. Step 11 will also branch on
+  // spec.type to pick the right builder.
+  const data = trendByDate(records, "Date");
   return {
     ...ECOMMON,
     color: [BRAND.red],
@@ -102,7 +109,7 @@ function buildLineOption(records: FeedbackRecord[]) {
 
 function buildHorizontalBarOption(
   records: FeedbackRecord[],
-  column: keyof FeedbackRecord,
+  column: string,
   topN = 15
 ) {
   const data = countBy(records, column).slice(0, topN).reverse();
@@ -149,7 +156,7 @@ function buildHorizontalBarOption(
 
 function buildDonutOption(
   records: FeedbackRecord[],
-  column: keyof FeedbackRecord
+  column: string
 ) {
   const data = countBy(records, column).slice(0, 8);
   return {

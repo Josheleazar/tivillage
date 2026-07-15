@@ -1,41 +1,95 @@
-import { ageBucket, formatPct } from "./utils";
-import type {
-  FeedbackRecord,
-  Filters,
-  Kpis,
-} from "./types";
+import { ageBucket } from "./utils";
+import type { Cell, DynamicRecord, FormConfig } from "./types";
 
-const STATUS_OPEN = new Set(["New Feedback", "Old Feedback Under investigations"]);
-const STATUS_RESOLVED = new Set(["Resolved & Closed"]);
+// =============================================================================
+//  lib/filters.ts — form-aware filter + analytics helpers (Step 7).
+//
+//  Every helper takes the active FormConfig and walks its declarative
+//  shapes (searchFields, filters, dateColumn, kpis, tableColumns) so
+//  adding a third form does NOT require editing this file. Pre-Step-7
+//  this file hard-coded the 24-key PascalCase FeedbackRecord shape and
+//  the 14-entry SEARCH_FIELDS list; Step 7 was the moment where each
+//  helper got "form-native" so WeWork's snake_case columns + ISO
+//  datetime dateColumn worked without special-casing.
+//
+//  Lesson-learned guardrails carried into the rewrite (DASHPLUS_PLAN.md §3):
+//
+//  - Date normalisation: `_submission_time` ISO datetimes and Cordaid
+//    "Date" YYYY-MM-DD strings both flow through the same path
+//    (slice(0,10) to YYYY-MM-DD prefix) so day-level lex compare stays
+//    correct regardless of which column the form points at.
+//  - Select predicate walker: every `form.filters[type="select"]` runs
+//    only when both the filter is non-empty AND the record's value
+//    differs. Records with null/missing sourceColumn values still fall
+//    through (so Wework records missing `businesstype` aren't dropped
+//    when the businesstype filter is left blank).
+//  - Date bounds tolerate missing dates: Kobo data is dirty; aggressive
+//    stripping would silently under-count when a filtered date range
+//    is applied. Records with null dateColumn pass through date bounds
+//    rather than getting dropped on `r.Date && r.Date < start`.
+//  - Search haystack: when query is non-empty, joins all non-null values
+//    of form.searchFields. If form.searchFields is empty while query
+//    is non-empty, the haystack is empty and the predicate always
+//    fails — that's a "your query has no fields to match" state, not
+//    a crash. Consumers can surface this if they want.
+// =============================================================================
 
-// Text-searchable fields shared by `applyFilters` (page-level search) and
-// `searchRecords` (table-level quick filter). Keep both in sync via this
-// single source of truth.
-export const SEARCH_FIELDS: (keyof FeedbackRecord)[] = [
-  "Date",
-  "Activity",
-  "Feedback Channel used",
-  "Feedback Category",
-  "Thematic Area",
-  "Project related to feedback",
-  "District",
-  "Subcounty",
-  "Village",
-  "Who is giving feedback?",
-  "Description of feedback, suggestion or complaint",
-  "Description of actions taken",
-  "Status of this feedback",
-  "Referral Status",
-];
+/**
+ * Builds the empty filter map for a given form, keyed by every
+ * `FilterDef.key`. Date inputs default to empty strings so the
+ * dashboard-client can layer on `withDefaultDates()` with bound-driven
+ * defaults AFTER this call.
+ *
+ * Pre-Step-7 this was a fixed 13-key interface constant
+ * (`emptyFilters`) hard-coded in lib/types.ts. The per-form shape
+ * means unknown ids (e.g. future forms) get exactly the keys they
+ * declared — no leakage from Cordaid's 13 fields into WeWork's 7.
+ */
+export function emptyFiltersForForm(form: FormConfig): Record<string, string> {
+  const f: Record<string, string> = {};
+  for (const def of form.filters) f[def.key] = "";
+  return f;
+}
 
+/**
+ * Normalises a Cell value to a YYYY-MM-DD date prefix for
+ * day-level lex compare. Returns null if the value isn't a non-empty
+ * string with a parseable year prefix.
+ *
+ * Both Cordaid's `Date` (already YYYY-MM-DD) and WeWork's
+ * `_submission_time` (e.g. `2026-07-08T11:52:16.000Z`) slice cleanly
+ * to a 10-char date prefix, so day-level bucket boundaries are
+ * correct regardless of which column the form points at. Without
+ * this, `r._submission_time < "2026-07-08"` lex-compare fails
+ * because `'T' (0x54) > '-' (0x2D)` makes `2026-07-08T...` look
+ * bigger than `2026-07-08`, dropping records submitted on the
+ * endDate day.
+ *
+ * Numeric Cells (rare — only if a form's `dateColumn` is an integer
+ * epoch) and null Cells return null; the caller treats null as
+ * "skip the date predicate for this record".
+ */
+function normalizeDate(v: Cell): string | null {
+  if (typeof v !== "string" || !v) return null;
+  if (!/^\d{4}-\d{2}-\d{2}/.test(v)) return null;
+  return v.slice(0, 10);
+}
+
+/**
+ * Page-level + table-level free-text search. Caller passes the
+ * form-specific searchFields so the haystack adapts to whichever
+ * form is active (Cordaid's PascalCase keys vs. WeWork's snake_case
+ * keys). Empty query short-circuits to identity.
+ */
 export function searchRecords(
-  records: FeedbackRecord[],
-  query: string
-): FeedbackRecord[] {
+  records: DynamicRecord[],
+  query: string,
+  searchFields: string[]
+): DynamicRecord[] {
   const q = query.trim().toLowerCase();
   if (!q) return records;
   return records.filter((r) => {
-    const haystack = SEARCH_FIELDS
+    const haystack = searchFields
       .map((k) => (r[k] == null ? "" : String(r[k])))
       .join(" | ")
       .toLowerCase();
@@ -43,42 +97,53 @@ export function searchRecords(
   });
 }
 
+/**
+ * Generic predicate walker for the form's filter strip. Three passes:
+ *
+ * 1. Date-bounds predicate against form.dateColumn (records with
+ *    null dateColumn pass through — see the lesson-learned note).
+ * 2. Per-FilterDef select equality walk: drops the record when
+ *    `filters[def.key]` is non-empty AND `r[def.sourceColumn] !==
+ *    selected`. Records whose column is null/missing still pass
+ *    (select filter only filters out, never drops everything).
+ * 3. Free-text search over form.searchFields. Empty query
+ *    short-circuits.
+ *
+ * Unknown filter keys (e.g. a stale URL frag) are silently ignored
+ * so switchForm's URL refresh can't crash the dashboard mid-flight.
+ */
 export function applyFilters(
-  records: FeedbackRecord[],
-  filters: Filters
-): FeedbackRecord[] {
-  const search = filters.search.trim().toLowerCase();
+  records: DynamicRecord[],
+  filters: Record<string, string>,
+  form: FormConfig
+): DynamicRecord[] {
+  const startDate = filters.startDate ?? "";
+  const endDate = filters.endDate ?? "";
+  const search = (filters.search ?? "").trim().toLowerCase();
 
   return records.filter((r) => {
-    if (filters.project && r["Project related to feedback"] !== filters.project)
-      return false;
-    if (filters.district && r.District !== filters.district) return false;
-    if (filters.subcounty && r.Subcounty !== filters.subcounty) return false;
-    if (filters.category && r["Feedback Category"] !== filters.category)
-      return false;
-    if (filters.status && r["Status of this feedback"] !== filters.status)
-      return false;
-    if (filters.gender && r.Gender !== filters.gender) return false;
-    if (
-      filters.channel &&
-      r["Feedback Channel used"] !== filters.channel
-    )
-      return false;
-    if (filters.thematic && r["Thematic Area"] !== filters.thematic)
-      return false;
-    if (
-      filters.referral &&
-      r["Referral Status"] !== filters.referral
-    )
-      return false;
-    if (filters.emergency && r["Emergency Feedback"] !== filters.emergency)
-      return false;
+    // Pass 1: date bounds.
+    if (startDate || endDate) {
+      const v = normalizeDate(r[form.dateColumn]);
+      if (v !== null) {
+        if (startDate && v < startDate) return false;
+        if (endDate && v > endDate) return false;
+      }
+    }
 
-    if (filters.startDate && r.Date && r.Date < filters.startDate) return false;
-    if (filters.endDate && r.Date && r.Date > filters.endDate) return false;
+    // Pass 2: select predicates.
+    for (const def of form.filters) {
+      if (def.type !== "select") continue;
+      if (!def.sourceColumn) continue;
+      const selected = filters[def.key];
+      if (!selected) continue;
+      if (r[def.sourceColumn] !== selected) return false;
+    }
 
+    // Pass 3: free-text search (over form.searchFields only — no
+    // meta-field leakage).
     if (search) {
-      const haystack = SEARCH_FIELDS
+      const haystack = form.searchFields
         .map((k) => (r[k] == null ? "" : String(r[k])))
         .join(" | ")
         .toLowerCase();
@@ -89,9 +154,16 @@ export function applyFilters(
   });
 }
 
+/**
+ * Builds the per-select option set for a column. Tolerates any Cell
+ * value (string | number | null) by coercing via String() so numeric
+ * columns still get a sensible dropdown. Records whose cell is
+ * null/empty are skipped; the result is sorted alpha for stable
+ * menu order.
+ */
 export function uniqueValues(
-  records: FeedbackRecord[],
-  column: keyof FeedbackRecord
+  records: DynamicRecord[],
+  column: string
 ): string[] {
   const set = new Set<string>();
   for (const r of records) {
@@ -102,69 +174,35 @@ export function uniqueValues(
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
-function countWhere(
-  records: FeedbackRecord[],
-  predicate: (r: FeedbackRecord) => boolean
-): number {
-  let n = 0;
-  for (const r of records) if (predicate(r)) n++;
-  return n;
-}
-
-export function computeKpis(records: FeedbackRecord[]): Kpis {
-  const total = records.length;
-  const resolved = countWhere(
-    records,
-    (r) => r["Status of this feedback"] != null && STATUS_RESOLVED.has(r["Status of this feedback"])
-  );
-  const open = countWhere(
-    records,
-    (r) => r["Status of this feedback"] != null && STATUS_OPEN.has(r["Status of this feedback"])
-  );
-  const emergency = countWhere(
-    records,
-    (r) => r["Emergency Feedback"] === "Yes"
-  );
-  const referred = countWhere(
-    records,
-    (r) => r["Referral Status"] != null && r["Referral Status"] !== "Not Referred"
-  );
-  const female = countWhere(records, (r) => r.Gender === "Female");
-  const districts = new Set(
-    records.map((r) => r.District).filter((d): d is string => !!d)
-  );
-
-  let daysSum = 0;
-  let daysCount = 0;
-  for (const r of records) {
-    const v = r["Days taken to resolved this feedback"];
-    if (typeof v === "number" && !Number.isNaN(v)) {
-      daysSum += v;
-      daysCount++;
-    }
+/**
+ * Walks `form.kpis`; each closure produces its tile's value.
+ * Pure function — does NOT memoize; callers wrap with useMemo so
+ * React renders stay cheap.
+ *
+ * Per the KpiConfig contract, compute closures return
+ * `string | number` (never null). They return 0 or "0.0" at the call
+ * site if they can't compute a value (e.g. `avgDaysToResolve(records)`
+ * when no resolved records exist).
+ */
+export function computeKpis(
+  records: DynamicRecord[],
+  form: FormConfig
+): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  for (const kpi of form.kpis) {
+    out[kpi.key] = kpi.compute(records);
   }
-  const avgDaysToResolve = daysCount ? Math.round((daysSum / daysCount) * 10) / 10 : 0;
-
-  return {
-    total,
-    resolved,
-    open,
-    emergency,
-    referred,
-    female,
-    districtsCovered: districts.size,
-    avgDaysToResolve,
-    resolvedPct: parseInt(formatPct(resolved, total)),
-    openPct: parseInt(formatPct(open, total)),
-    emergencyPct: parseInt(formatPct(emergency, total)),
-    referredPct: parseInt(formatPct(referred, total)),
-    femalePct: parseInt(formatPct(female, total)),
-  };
+  return out;
 }
 
+/**
+ * Frequency count for any column. Numeric Cells stringified via
+ * String() so even if a future form has an integer column with a
+ * small range of values, the donut chart still works.
+ */
 export function countBy(
-  records: FeedbackRecord[],
-  column: keyof FeedbackRecord
+  records: DynamicRecord[],
+  column: string
 ): Array<{ key: string; count: number }> {
   const map = new Map<string, number>();
   for (const r of records) {
@@ -178,26 +216,51 @@ export function countBy(
   );
 }
 
+/**
+ * Trend chart series over `dateColumn`. Slices the YYYY-MM-DD prefix
+ * from each value so the X axis reads naturally (day-level buckets
+ * render better than minute-level). Caller is responsible for the
+ * chart's column choice — Step 11 will route `form.charts[0]` to
+ * this helper with `form.dateColumn`.
+ */
 export function trendByDate(
-  records: FeedbackRecord[]
+  records: DynamicRecord[],
+  dateColumn: string
 ): Array<{ date: string; count: number }> {
   const map = new Map<string, number>();
   for (const r of records) {
-    if (!r.Date) continue;
-    map.set(r.Date, (map.get(r.Date) ?? 0) + 1);
+    const v = r[dateColumn];
+    const d = normalizeDate(v);
+    if (d === null) continue;
+    map.set(d, (map.get(d) ?? 0) + 1);
   }
   return Array.from(map, ([date, count]) => ({ date, count })).sort(
     (a, b) => (a.date < b.date ? -1 : 1)
   );
 }
 
+/**
+ * Stacked age buckets from `r.Age`. Coerces numeric strings
+ * defensively — older Kobo deployments persisted integer questions
+ * as strings, and lib/kobo.ts's numOf coercion is best-effort.
+ * Records with genuinely missing/garbage ages land in the "Unknown"
+ * bucket via ageBucket(null).
+ */
 export function ageDistribution(
-  records: FeedbackRecord[]
+  records: DynamicRecord[]
 ): Array<{ key: string; count: number }> {
-  const map = new Map<string, number>();
   const order = ["Under 18", "18–24", "25–34", "35–44", "45–54", "55+", "Unknown"];
+  const map = new Map<string, number>();
   for (const r of records) {
-    const bucket = ageBucket(r.Age);
+    const raw = r.Age;
+    let age: number | null = null;
+    if (typeof raw === "number") {
+      age = raw;
+    } else if (typeof raw === "string" && raw !== "") {
+      const n = Number(raw);
+      if (Number.isFinite(n)) age = n;
+    }
+    const bucket = ageBucket(age);
     map.set(bucket, (map.get(bucket) ?? 0) + 1);
   }
   return order
@@ -205,29 +268,18 @@ export function ageDistribution(
     .map((k) => ({ key: k, count: map.get(k) ?? 0 }));
 }
 
-export function toCsv(records: FeedbackRecord[]): string {
+/**
+ * CSV projection per `form.tableColumns`. Header labels drive the
+ * CSV header line; column keys drive row projection order.
+ * Records with null cells render as empty strings; commas/quotes/
+ * newlines in values are RFC-4180 escaped.
+ */
+export function toCsv(
+  records: DynamicRecord[],
+  form: FormConfig
+): string {
   if (!records.length) return "";
-  const cols: (keyof FeedbackRecord)[] = [
-    "Date",
-    "Activity",
-    "Feedback Channel used",
-    "Feedback Category",
-    "Emergency Feedback",
-    "Thematic Area",
-    "Project related to feedback",
-    "District",
-    "Subcounty",
-    "Village",
-    "Who is giving feedback?",
-    "Gender",
-    "Age",
-    "Description of feedback, suggestion or complaint",
-    "Description of actions taken",
-    "Referral Status",
-    "Status of this feedback",
-    "Date feedback was resolved",
-    "Days taken to resolved this feedback",
-  ];
+  const cols = form.tableColumns.map((c) => c.key);
 
   const escape = (val: unknown) => {
     const s = val == null ? "" : String(val);
@@ -237,8 +289,11 @@ export function toCsv(records: FeedbackRecord[]): string {
     return s;
   };
 
-  const rows = records.map((r) => cols.map((c) => escape(r[c])).join(","));
-  return [cols.join(","), ...rows].join("\n");
+  const header = form.tableColumns.map((c) => escape(c.label)).join(",");
+  const rows = records.map((r) =>
+    cols.map((c) => escape(r[c])).join(",")
+  );
+  return [header, ...rows].join("\n");
 }
 
 export function downloadCsv(filename: string, csv: string) {

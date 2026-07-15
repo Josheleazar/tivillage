@@ -8,14 +8,28 @@ import { DetailDrawer } from "@/components/dashboard/detail-drawer";
 import { FeedbackTable } from "@/components/dashboard/feedback-table";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { KpiCards } from "@/components/dashboard/kpi-cards";
-import { applyFilters, computeKpis, downloadCsv, toCsv } from "@/lib/filters";
-import type { ApiMeta, DynamicRecord, FeedbackRecord, Filters } from "@/lib/types";
+import {
+  applyFilters,
+  computeKpis,
+  downloadCsv,
+  emptyFiltersForForm,
+  toCsv,
+} from "@/lib/filters";
+import type { ApiMeta, DynamicRecord, Filters } from "@/lib/types";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { getForm, listForms } from "@/lib/dashboards";
 
+// `Filters` (in lib/types.ts) is `Record<string, string>` keyed by the
+// active form's FilterDef.key — no per-form branching in this file, so
+// WeWork's 7-field state and any future form's N-field state all flow
+// through the same dashboard-client code path.
+
 const DATE_BOUNDS_KEY = "cordaid-date-bounds";
 
-function withDefaultDates(filters: Filters, bounds: { min: string; max: string }) {
+function withDefaultDates(
+  filters: Filters,
+  bounds: { min: string; max: string },
+) {
   return {
     ...filters,
     startDate: bounds.min,
@@ -32,24 +46,6 @@ function pickBounds(
     .filter((d): d is string => typeof d === "string" && !!d)
     .sort();
   return { min: dates[0] ?? "", max: dates[dates.length - 1] ?? "" };
-}
-
-function emptyFilters(): Filters {
-  return {
-    project: "",
-    district: "",
-    subcounty: "",
-    category: "",
-    status: "",
-    gender: "",
-    channel: "",
-    thematic: "",
-    referral: "",
-    emergency: "",
-    search: "",
-    startDate: "",
-    endDate: "",
-  };
 }
 
 export function DashboardClient() {
@@ -74,10 +70,10 @@ export function DashboardClient() {
   const [meta, setMeta] = useState<ApiMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Filter state retains the legacy `Filters` shape today so the
-  // existing lib/filters.ts helpers keep compiling — Step 7 reformats
-  // it to `Record<string, string>` keyed by FilterDef.key. The state
-  // shape is unchanged at this step.
+  // Per-Step-7, `Filters` is now `Record<string, string>` keyed by the
+  // active form's FilterDef.key. Couples with emptyFiltersForForm()
+  // (lib/filters.ts) and applyFilters(records, filters, form) so adding
+  // a third form needs no edits to this file.
   const [filters, setFilters] = useState<Filters | null>(null);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<DynamicRecord | null>(null);
@@ -124,7 +120,7 @@ export function DashboardClient() {
         } catch {
           // ignore storage errors (private mode)
         }
-        setFilters(withDefaultDates(emptyFilters(), bounds));
+        setFilters(withDefaultDates(emptyFiltersForForm(form), bounds));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         if (!cancelled) setError(message);
@@ -138,36 +134,30 @@ export function DashboardClient() {
     };
   }, [formKey, form.dateColumn]);
 
-  // TODAY bridge: lib/filters.ts + downstream components still consume
-  // FeedbackRecord[] (Step 7 re-ports them to FormConfig + DynamicRecord).
-  // These `as unknown as FeedbackRecord[]` casts allow the existing
-  // helpers to compile against the open-dict DynamicRecord[] that
-  // lib/kobo.ts now emits. They are expected-runtime-safe because every
-  // Cordaid record resolves to the same PascalCase-shape JSON it did
-  // pre-refactor (verified at runtime in Step 13's no-regression check);
-  // WeWork routes through the same bridge while Step 7 reformats the
-  // helper + consumer set to consume DynamicRecord[] directly.
+  // Step-7: lib/filters.ts now consumes DynamicRecord[] natively (no more
+  // `as unknown as FeedbackRecord[]` bridge). `applyFilters(records,
+  // filters, form)` walks form.filters + form.dateColumn + form.searchFields
+  // so the same dashboard mounts Cordaid OR WeWork. `filtered` is the
+  // post-filter slice that feeds Charts, FeedbackTable, KpiCards, and
+  // the CSV export.
   const filtered = useMemo(() => {
-    if (!filters) return [] as unknown as FeedbackRecord[];
-    return applyFilters(
-      records as unknown as FeedbackRecord[],
-      filters,
-    );
-  }, [records, filters]);
+    if (!filters) return [];
+    return applyFilters(records, filters, form);
+  }, [records, filters, form]);
 
   const kpis = useMemo(
-    () => computeKpis(filtered as unknown as FeedbackRecord[]),
-    [filtered],
+    () => computeKpis(filtered, form),
+    [filtered, form],
   );
 
-  function updateFilters(partial: Partial<Filters>) {
+  function updateFilters(partial: Filters) {
     setFilters((prev) => (prev ? { ...prev, ...partial } : prev));
   }
 
   function resetFilters() {
     if (!records.length) return;
     const bounds = pickBounds(records, form.dateColumn);
-    setFilters(withDefaultDates(emptyFilters(), bounds));
+    setFilters(withDefaultDates(emptyFiltersForForm(form), bounds));
   }
 
   function exportCsv() {
@@ -175,7 +165,7 @@ export function DashboardClient() {
     const date = new Date().toISOString().slice(0, 10);
     downloadCsv(
       `${formKey}-feedback-${date}.csv`,
-      toCsv(filtered as unknown as FeedbackRecord[]),
+      toCsv(filtered, form),
     );
   }
 
@@ -230,20 +220,21 @@ export function DashboardClient() {
       <main className="container py-6 space-y-6">
         <FilterBar
           filters={filters}
-          records={records as unknown as FeedbackRecord[]}
+          records={records}
           onChange={updateFilters}
           onReset={resetFilters}
           onExport={exportCsv}
         />
 
-        <KpiCards kpis={kpis} />
+        <KpiCards kpis={kpis} form={form} records={filtered} />
 
         <Charts records={filtered} />
 
         <FeedbackTable
-          records={filtered as unknown as FeedbackRecord[]}
+          records={filtered}
+          form={form}
           onSelect={(record) => {
-            setSelected(record as unknown as DynamicRecord);
+            setSelected(record);
             setOpen(true);
           }}
         />
@@ -262,7 +253,7 @@ export function DashboardClient() {
       </main>
 
       <DetailDrawer
-        record={selected as unknown as FeedbackRecord | null}
+        record={selected}
         open={open}
         onOpenChange={(next) => {
           setOpen(next);

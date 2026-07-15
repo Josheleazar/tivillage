@@ -2,8 +2,9 @@
 //  Core types for the multi-form feedback dashboard (dashPlus migration).
 //
 //  Step 1 of 14 (DASHPLUS_PLAN.md). Adds DynamicRecord + FormConfig + per-
-//  form registry types alongside the existing strict FeedbackRecord so
-//  downstream callers don't break until later steps replace their usage.
+//  form registry types. Step 7 phases out the legacy FeedbackRecord +
+// Filters + Kpis shapes — see the historical_memory note on that commit
+// for the bridge rationale.
 // =============================================================================
 
 /**
@@ -15,10 +16,10 @@ export type Cell = string | number | null;
 
 /**
  * Generic record shape. Kobo submissions are projected into this
- * dictionary + the canonical metadata fields below. New forms write
- * directly into this shape; legacy code that targets FeedbackRecord
- * is also assignable here because the valueMap translation in
- * lib/kobo.ts keeps label-keyed outputs stable.
+ * dictionary + the canonical metadata fields below. Per-form
+ * FormConfig entries declare which keys to filter on, count, render in
+ * the table, etc. — lib/filters.ts walks those declarations instead
+ * of relying on a fixed PascalCase shape.
  */
 export interface DynamicRecord extends Record<string, Cell> {
   _id: number;
@@ -27,112 +28,40 @@ export interface DynamicRecord extends Record<string, Cell> {
 }
 
 // -----------------------------------------------------------------------------
-// Legacy Cordaid-specific types. Preserved for backward compatibility;
-// Step 3 (lib/kobo.ts refactor) and Step 7 (lib/filters.ts refactor)
-// phase them out. New code should target DynamicRecord and the per-form
-// FormConfig shapes below.
+//  Filter state — the live value bound to `useState` in
+//  DashboardClient. Step 7 makes this a generic Record so adding a
+//  third form's filter widgets doesn't require widening this type.
 // -----------------------------------------------------------------------------
 
 /**
- * Strict record shape for the Cordaid feedback form. lib/kobo.ts still
- * returns `FeedbackRecord[]` until Step 3 swaps that out for
- * `DynamicRecord[]` (the structural shape is identical; only the typing
- * loosens). New code should consume DynamicRecord.
- *
- * @deprecated Will be removed in Step 3 of the dashPlus migration.
+ * Per-form filter values, keyed by `FilterDef.key`. Indexed by string
+ * so widgets for forms not yet registered don't trip typecheck.
+ * DashboardClient initialises with `emptyFiltersForForm(form)` so
+ * every `Keyed<def.key>` exists on first render.
  */
-export interface FeedbackRecord {
-  Date: string | null;
-  Activity: string | null;
-  "Feedback Channel used": string | null;
-  "Feedback Category": string | null;
-  "Emergency Feedback": "Yes" | "No" | null;
-  "Thematic Area": string | null;
-  "Project related to feedback": string | null;
-  District: string | null;
-  Subcounty: string | null;
-  Village: string | null;
-  "Who is giving feedback?": string | null;
-  Gender: "Male" | "Female" | null;
-  Age: number | null;
-  "Description of feedback, suggestion or complaint": string | null;
-  "Description of actions taken": string | null;
-  "Referral Status": string | null;
-  "Status of this feedback": string | null;
-  "Date feedback was resolved": string | null;
-  "Days taken to resolved this feedback": number | null;
-  "Reported to Integrity Focal Person": string | null;
-  "Feedback requires urgent response": string | null;
-  "Feedback Categorized as": string | null;
-  _submission_time: string | null;
-  _id: number;
-  _uuid: string;
-}
+export type Filters = Record<string, string>;
+
+// -----------------------------------------------------------------------------
+//  Per-form KPI output — produced by `computeKpis(records, form)`.
+//  Keys are `KpiConfig.key` per form. Values are the closed-over
+//  compute-closure return (always string | number; never null per the
+//  KpiConfig.compute contract which returns 0 or "0.0" at the call
+//  site when it can't compute a value).
+// -----------------------------------------------------------------------------
 
 /**
- * Legacy `Filters` shape for the Cordaid dashboard. Step 7 replaces
- * this with `Record<string, string>` keyed by `FilterDef.key`, making
- * the form-picker introduce new filter sets without touching shared
- * types. We keep this shape so `filter-bar.tsx`, `dashboard-client.tsx`,
- * and the API route keep typechecking during the multi-step migration.
- *
- * @deprecated Will be replaced in Step 7 with a generic
- * `Record<string, string>` keyed by `FilterDef.key`.
+ * Map form → KPI value. Lookup `kpis[kpi.key]` to read a tile's value
+ * for rendering. kpi-cards.tsx (Step 10) wraps each `KpiConfig` to
+ * render via `Map[kpi.key]`.
  */
-export interface Filters {
-  project: string;
-  district: string;
-  subcounty: string;
-  category: string;
-  status: string;
-  gender: string;
-  channel: string;
-  thematic: string;
-  referral: string;
-  emergency: string;
-  startDate: string;
-  endDate: string;
-  search: string;
-}
+export type Kpis = Record<string, string | number>;
 
-export const emptyFilters: Filters = {
-  project: "",
-  district: "",
-  subcounty: "",
-  category: "",
-  status: "",
-  gender: "",
-  channel: "",
-  thematic: "",
-  referral: "",
-  emergency: "",
-  startDate: "",
-  endDate: "",
-  search: "",
-};
-
-/**
- * Legacy flat-record KPI output. Step 7 replaces this with the
- * `Record<string, Cell>` map that `computeKpis(records, config)` builds
- * by walking each form's `KpiConfig.compute` closure.
- *
- * @deprecated Will be removed in Step 7.
- */
-export interface Kpis {
-  total: number;
-  resolvedPct: number;
-  openPct: number;
-  emergencyPct: number;
-  referredPct: number;
-  avgDaysToResolve: number;
-  femalePct: number;
-  districtsCovered: number;
-  resolved: number;
-  open: number;
-  emergency: number;
-  referred: number;
-  female: number;
-}
+// -----------------------------------------------------------------------------
+//  Legacy types (FEEDBACK_RECORD) removed in Step 7 — see DASHPLUS_PLAN.md
+//  §5 step 7. lib/kobo.ts now emits DynamicRecord[]; lib/filters.ts
+//  consumes DynamicRecord[]; component consumers in Steps 8/9/11/12
+//  reformat to DynamicRecord[] typed props via the staged bridge.
+// -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
 // Per-form configuration shapes. Steps 2 uses these in lib/dashboards/*.ts;

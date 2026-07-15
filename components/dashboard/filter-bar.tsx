@@ -4,14 +4,26 @@ import { Search, RotateCcw, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { FILTER_DEFS } from "@/lib/constants";
-import type { FeedbackRecord, Filters } from "@/lib/types";
 import { uniqueValues } from "@/lib/filters";
+import { FILTER_DEFS } from "@/lib/constants";
+import type { DynamicRecord, Filters } from "@/lib/types";
+
+// Bridge alias — Step 8 reformats filter-bar.tsx to read form.filters +
+// form.dateColumn from FormConfig instead of the hardcoded FILTER_DEFS.
+// Until then this alias keeps the pre-Step-7 prop signature compileable.
+type FeedbackRecord = DynamicRecord;
 
 interface FilterBarProps {
   filters: Filters;
   records: FeedbackRecord[];
-  onChange: (next: Partial<Filters>) => void;
+  /**
+   * Accepts a partial Filters update keyed by FilterDef.key. The
+   * signature uses Filters (Record<string,string>) rather than
+   * Partial<Filters> because every widget in this component emits
+   * non-empty string values; widening to string|undefined would force
+   * upstream runtime guards for a value shape we never produce.
+   */
+  onChange: (next: Filters) => void;
   onReset: () => void;
   onExport: () => void;
 }
@@ -54,7 +66,7 @@ export function FilterBar({
                   value={value}
                   min={min}
                   max={max}
-                  onChange={(e) => onChange({ [def.key]: e.target.value } as Partial<Filters>)}
+                  onChange={(e) => onChange({ [def.key]: e.target.value })}
                 />
               </div>
             );
@@ -83,7 +95,11 @@ export function FilterBar({
             );
           }
 
-          const column = def.sourceColumn as keyof FeedbackRecord;
+          // `def.sourceColumn` is a string column name; coerce to a
+          // string type so Step 7's widened `uniqueValues(records,
+          // column: string)` signature accepts it. Step 8 will replace
+          // this with a direct form.filters walk.
+          const column: string = def.sourceColumn ?? def.key;
           const options = uniqueValues(records, column);
           const value = filters[def.key] as string;
           return (
@@ -93,7 +109,7 @@ export function FilterBar({
               </label>
               <Select
                 value={value}
-                onChange={(e) => onChange({ [def.key]: e.target.value } as Partial<Filters>)}
+                onChange={(e) => onChange({ [def.key]: e.target.value })}
               >
                 <option value="">All {def.label.toLowerCase()}s</option>
                 {options.map((opt) => (

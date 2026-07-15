@@ -29,7 +29,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { searchRecords } from "@/lib/filters";
 import { cn } from "@/lib/utils";
-import type { FeedbackRecord } from "@/lib/types";
+import type { Cell, DynamicRecord, FormConfig } from "@/lib/types";
+
+// Bridge alias — Step 9 reformats feedback-table.tsx to natively
+// consume DynamicRecord + FormConfig (tableColumns + searchFields).
+// Until then this aliased type keeps the pre-Step-7 prop signature
+// compileable while lib/filters.ts emits DynamicRecord[].
+type FeedbackRecord = DynamicRecord;
 
 type SortKey =
   | "Date"
@@ -76,23 +82,39 @@ const COLUMNS: ColumnDef[] = [
 
 const PAGE_SIZES = [10, 25, 50, 100] as const;
 
-function statusVariant(status: string | null): "success" | "warning" | "muted" {
-  if (!status) return "muted";
-  if (status.includes("Resolved")) return "success";
-  if (status.includes("New") || status.includes("Under")) return "warning";
+function statusVariant(status: Cell): "success" | "warning" | "muted" {
+  // Coerce numerics/null to string for the .includes() check. Kobo
+  // select_one options normalise to display labels so Cell is
+  // overwhelmingly a string here, but lib/kobo.ts can also leave
+  // integer responses as numbers under older deployments.
+  const v =
+    typeof status === "string"
+      ? status
+      : status == null
+        ? ""
+        : String(status);
+  if (!v) return "muted";
+  if (v.includes("Resolved")) return "success";
+  if (v.includes("New") || v.includes("Under")) return "warning";
   return "muted";
 }
 
-function emergencyVariant(v: string | null): "default" | "muted" {
+function emergencyVariant(v: Cell): "default" | "muted" {
   return v === "Yes" ? "default" : "muted";
 }
 
 interface FeedbackTableProps {
   records: FeedbackRecord[];
+  /**
+   * Form config drives the table-scoped quick filter (`searchRecords` walks
+   * `form.searchFields`). Step 9 reformats the table to also read
+   * `form.tableColumns` so the column set rebinds per form.
+   */
+  form: FormConfig;
   onSelect: (record: FeedbackRecord) => void;
 }
 
-export function FeedbackTable({ records, onSelect }: FeedbackTableProps) {
+export function FeedbackTable({ records, form, onSelect }: FeedbackTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("Date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -103,8 +125,8 @@ export function FeedbackTable({ records, onSelect }: FeedbackTableProps) {
   // produced `records`, and is intentionally independent of the global
   // FilterBar so it doesn't affect KPIs, charts, or the CSV export.
   const tableRows = useMemo(
-    () => searchRecords(records, localSearch),
-    [records, localSearch]
+    () => searchRecords(records, localSearch, form.searchFields),
+    [records, localSearch, form.searchFields]
   );
 
   // Reset to first page whenever the table-scoped search changes.
