@@ -122,21 +122,33 @@ async function authedFetch(
 }
 
 /**
- * KPI v2 emits `label` in three shapes depending on form-translation
+ * KPI v2 emits `label` in four shapes depending on form-translation
  * configuration:
  *   1. a plain string (older API responses, single-language forms)
  *   2. an array of strings, where `label[0]` is the default language
  *      (THE modal shape on current kf.kobotoolbox.org deployments)
  *   3. a {language: string} dictionary on forms with multiple translations
+ *   4. PER-LANGUAGE TOP-LEVEL KEYS with a `::` separator (Kobo v2
+ *      asset-content responses since 2026-07): the generic `label`
+ *      field is `null` and the row carries sibling keys like
+ *      `"label::English": "District"`. Detected by passing the
+ *      owning row as `row` to this helper. See AGRIP_PLAN.md §C.4.
  *
- * Handle all three. The array shape MUST be detected before the object
+ * Handle all four. The array shape MUST be detected before the object
  * branch because `typeof === 'object'` returns true for arrays — if we
  * fell through to the dict branch we'd dereference `label["English (en)"]`
  * on an array, get `undefined`, and silently emit an empty label, which
  * then short-circuits `nameToLabel` (every question was being skipped in
  * the previous fix because `extractLabel` returned "" for every label).
+ *
+ * The `row` arg is OPTIONAL — call sites that only pass the `label`
+ * value still work for shapes 1–3 (Cordaid/WeWork paths). Only the
+ * three AGRIP-relevant call sites pass `row` to opt into shape 4.
  */
-function extractLabel(label: unknown): string {
+function extractLabel(
+  label: unknown,
+  row?: Record<string, unknown>,
+): string {
   // Array shape: walk to the first non-empty string. Defensive against
   // mixed-type arrays ([0] could in theory be a localised dict placeholder).
   if (Array.isArray(label)) {
@@ -159,6 +171,24 @@ function extractLabel(label: unknown): string {
     if (typeof dict["English (en)"] === "string") return dict["English (en)"];
     if (typeof dict.English === "string") return dict.English;
     if (typeof dict.en === "string") return dict.en;
+  }
+  // Shape 4 (NEW): per-language top-level `label::*` keys. Kobo v2
+  // emits these on assets where translations are configured — and
+  // observed on the AGRIP asset (aiJYFaTY5WKVwCyQySjaYw) post-2026-07-19
+  // xlsx deploy. Prefer English (`label::English`); fall back to
+  // first non-empty `label::*` entry if English is missing or empty.
+  if (row && typeof row === "object") {
+    const langs = Object.keys(row).filter(
+      (k) =>
+        k.startsWith("label::") &&
+        typeof row[k] === "string" &&
+        (row[k] as string).length > 0,
+    );
+    if (langs.length) {
+      const eng = langs.find((k) => k === "label::English");
+      if (eng) return String(row[eng]);
+      return String(row[langs[0]]);
+    }
   }
   return "";
 }
@@ -273,7 +303,10 @@ export async function fetchKoboFormMeta(
     if (!c || typeof c !== "object") continue;
     const listName = (c as Record<string, unknown>).list_name;
     const slug = (c as Record<string, unknown>).name;
-    const cLabel = extractLabel((c as Record<string, unknown>).label);
+    const cLabel = extractLabel(
+      (c as Record<string, unknown>).label,
+      c as Record<string, unknown>,
+    );
     if (typeof listName !== "string" || !listName) continue;
     if (typeof slug !== "string" || !slug || !cLabel) continue;
     (byListName[listName] ??= {})[slug] = cLabel;
@@ -312,7 +345,10 @@ export async function fetchKoboFormMeta(
     if (typeof name !== "string" || !name) continue;
     surveyRowsObserved++;
     const path = groupStack.length ? `${groupStack.join("/")}/${name}` : name;
-    const lbl = extractLabel((q as Record<string, unknown>).label);
+    const lbl = extractLabel(
+      (q as Record<string, unknown>).label,
+      q as Record<string, unknown>,
+    );
     // Two-tier registration:
     //   - labelled leaves → register the raw group-prefixed path mapped
     //     to the dashboard label (so a record's "District" cell comes
@@ -364,7 +400,10 @@ export async function fetchKoboFormMeta(
           for (const c of inline) {
             if (!c || typeof c !== "object") continue;
             const cName = (c as Record<string, unknown>).name;
-            const cLabel = extractLabel((c as Record<string, unknown>).label);
+            const cLabel = extractLabel(
+              (c as Record<string, unknown>).label,
+              c as Record<string, unknown>,
+            );
             if (typeof cName === "string" && cName && cLabel) {
               inlineMap[cName] = cLabel;
             }
