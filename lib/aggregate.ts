@@ -70,7 +70,7 @@ const ECOMMON = {
   },
 };
 
-function buildLineOption(records: DynamicRecord[], dateColumn: string) {
+export function buildLineOption(records: DynamicRecord[], dateColumn: string) {
   const data = trendByDate(records, dateColumn);
   return {
     ...ECOMMON,
@@ -117,7 +117,7 @@ function buildLineOption(records: DynamicRecord[], dateColumn: string) {
   };
 }
 
-function buildHorizontalBarOption(
+export function buildHorizontalBarOption(
   records: DynamicRecord[],
   column: string,
   topN = 15,
@@ -170,7 +170,7 @@ function buildHorizontalBarOption(
   };
 }
 
-function buildDonutOption(records: DynamicRecord[], column: string) {
+export function buildDonutOption(records: DynamicRecord[], column: string) {
   const data = countBy(records, column).slice(0, 8);
   return {
     color: CHART_PALETTE,
@@ -212,7 +212,7 @@ function buildDonutOption(records: DynamicRecord[], column: string) {
   };
 }
 
-function buildAgeBarOption(records: DynamicRecord[], ageColumn: string) {
+export function buildAgeBarOption(records: DynamicRecord[], ageColumn: string) {
   const data = ageDistribution(records, ageColumn);
   return {
     ...ECOMMON,
@@ -252,7 +252,7 @@ function buildAgeBarOption(records: DynamicRecord[], ageColumn: string) {
  * whose source column has no data are silently excluded from the
  * aggregated response.
  */
-function hasMatchingData(records: DynamicRecord[], column: string): boolean {
+export function hasMatchingData(records: DynamicRecord[], column: string): boolean {
   for (const r of records) {
     const v = r[column];
     if (v != null && v !== "") return true;
