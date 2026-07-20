@@ -7,6 +7,13 @@ import { FormPicker } from "./form-picker";
 interface HeaderProps {
   records: DynamicRecord[];
   meta: ApiMeta | null;
+  /**
+   * Optional total record count (from the aggregated response's
+   * totalCount field). When present, used for the record badge
+   * instead of records.length, so the header shows the full dataset
+   * count (e.g. "61,681 records") rather than the page size (500).
+   */
+  totalCount?: number;
   // Form is passed through so the Period chip reads from
   // `form.dateColumn` (Cordaid: "Date", WeWork: "_submission_time")
   // and the top marque displays `form.label`. Without this prop the
@@ -34,6 +41,7 @@ interface HeaderProps {
 export function DashboardHeader({
   records,
   meta,
+  totalCount,
   form,
   forms,
   onSwitchForm,
@@ -78,7 +86,7 @@ export function DashboardHeader({
               <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold backdrop-blur-sm">
                 <Database className="h-4 w-4" />
                 <span>
-                  {records.length.toLocaleString()} records
+                  {(totalCount ?? records.length).toLocaleString()} records
                 </span>
               </div>
               <button
