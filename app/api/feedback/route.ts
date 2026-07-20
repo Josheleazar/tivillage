@@ -7,28 +7,27 @@ import {
   fetchKoboSubmissions,
   type KoboConfig,
 } from "@/lib/kobo";
+import { buildAggregatedResponse } from "@/lib/aggregate";
 import { getForm } from "@/lib/dashboards";
 
 // Node runtime so `fs` is available for the JSON fallback; Kobo fetches
 // use plain `fetch`, which works on Node and Edge.
 export const runtime = "nodejs";
 
-// ISR: serve a cached route response for ~60 s, then revalidate. This
-// keeps the dashboard snappy while still letting fresh Kobo data land
-// every minute. The fallback path uses a much shorter TTL so a
-// transient Kobo failure doesn't pin the dashboard to local JSON
-// for a whole minute.
-export const revalidate = 60;
+// ISR: no automatic revalidation. The route response persists until
+// manually invalidated via POST /api/feedback/refresh (which calls
+// revalidateTag("kobo-<formId>")). Only manual refresh cycles data.
+export const revalidate = false;
 
 const DEFAULT_KOBO_BASE_URL = "https://kf.kobotoolbox.org";
 
 const CACHE_HEADERS = {
   "Cache-Control":
-    "public, max-age=60, s-maxage=60, stale-while-revalidate=300",
+    "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
 };
 const FALLBACK_CACHE_HEADERS = {
   "Cache-Control":
-    "public, max-age=5, s-maxage=5, stale-while-revalidate=15",
+    "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400",
 };
 
 async function readLocalJson(): Promise<DynamicRecord[]> {
@@ -78,6 +77,29 @@ async function readLocalFallback(formId: string): Promise<DynamicRecord[]> {
   return readLocalJson();
 }
 
+/**
+ * Collects filter parameters from the URL query string, excluding
+ * system params (`form`, `aggregated`). Returns a plain record
+ * suitable for passing to `buildAggregatedResponse`.
+ *
+ * The returned map is keyed by FilterDef.key (e.g. `district`,
+ * `gender`, `startDate`, `endDate`, `search`) with string values.
+ * Unknown params are silently passed through — the aggregation
+ * engine's `applyFilters` call handles unrecognised keys gracefully.
+ */
+function collectFilterParams(
+  searchParams: URLSearchParams,
+): Record<string, string> {
+  const SYSTEM_PARAMS = new Set(["form", "aggregated"]);
+  const filters: Record<string, string> = {};
+  for (const [key, value] of searchParams.entries()) {
+    if (!SYSTEM_PARAMS.has(key) && value) {
+      filters[key] = value;
+    }
+  }
+  return filters;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const form = getForm(searchParams.get("form"));
@@ -99,7 +121,7 @@ export async function GET(req: Request) {
           baseUrl,
         } satisfies KoboConfig),
       ["kobo-fetch", form.id],
-      { revalidate: 60, tags: [`kobo-${form.id}`] }
+      { revalidate: false, tags: [`kobo-${form.id}`] }
     );
     try {
       const result = await taggedFetch();
@@ -139,6 +161,14 @@ export async function GET(req: Request) {
             "many record fields may render as raw Kobo keys.";
         }
       }
+      if (searchParams.get("aggregated") === "true") {
+        const filterParams = collectFilterParams(searchParams);
+        return NextResponse.json(
+          buildAggregatedResponse(result.records, form, filterParams, meta),
+          { headers: CACHE_HEADERS },
+        );
+      }
+
       return NextResponse.json(
         {
           count: result.records.length,
@@ -162,6 +192,14 @@ export async function GET(req: Request) {
         baseUrl,
         error: message,
       };
+      if (searchParams.get("aggregated") === "true") {
+        const filterParams = collectFilterParams(searchParams);
+        return NextResponse.json(
+          buildAggregatedResponse(records, form, filterParams, meta),
+          { headers: FALLBACK_CACHE_HEADERS },
+        );
+      }
+
       return NextResponse.json(
         { count: records.length, records, meta },
         { headers: FALLBACK_CACHE_HEADERS }
@@ -173,6 +211,15 @@ export async function GET(req: Request) {
   // forms return empty records.
   const records = await readLocalFallback(form.id);
   const meta: ApiMeta = { source: "local", count: records.length };
+
+  if (searchParams.get("aggregated") === "true") {
+    const filterParams = collectFilterParams(searchParams);
+    return NextResponse.json(
+      buildAggregatedResponse(records, form, filterParams, meta),
+      { headers: CACHE_HEADERS },
+    );
+  }
+
   return NextResponse.json(
     { count: records.length, records, meta },
     { headers: CACHE_HEADERS }
