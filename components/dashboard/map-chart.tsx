@@ -1,51 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   MapContainer,
   TileLayer,
-  Marker,
+  Circle,
   Popup,
 } from "react-leaflet";
-import type { GpsPoint } from "@/lib/filters";
+import type { DistrictBubble } from "@/lib/types";
 
 interface MapChartProps {
-  points: GpsPoint[];
+  points: DistrictBubble[];
+}
+
+/**
+ * Computes a circle radius (in metres) proportional to the record count
+ * for a district bubble. Uses sqrt scaling so large values don't produce
+ * unwieldy circles — a district with 10× the records of another gets
+ * roughly 3× the radius.
+ */
+function bubbleRadius(count: number): number {
+  return Math.sqrt(count) * 50;
 }
 
 export function MapChart({ points }: MapChartProps) {
-  const [leafletReady, setLeafletReady] = useState(false);
-
-  // Dynamically import Leaflet core inside useEffect to avoid SSR crash.
-  // Fix the default marker icon paths broken by webpack bundling.
-  useEffect(() => {
-    import("leaflet").then((L) => {
-      delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)
-        ._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-      });
-      setLeafletReady(true);
-    });
-  }, []);
+  // MapChart is dynamically imported with ssr:false, so it only mounts
+  // client-side. react-leaflet is always available when this renders.
 
   if (!points.length) {
     return (
       <div className="flex h-[300px] items-center justify-center text-xs text-cordaid-muted">
         No GPS coordinates in the filtered records.
-      </div>
-    );
-  }
-
-  if (!leafletReady) {
-    return (
-      <div className="flex h-[300px] items-center justify-center text-xs text-cordaid-muted">
-        Loading map…
       </div>
     );
   }
@@ -75,17 +59,30 @@ export function MapChart({ points }: MapChartProps) {
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />        {points.map((p, i) => (
-        <Marker key={i} position={[p.lat, p.lng] as [number, number]}>
+      />
+      {points.map((p, i) => (
+        <Circle
+          key={i}
+          center={[p.lat, p.lng] as [number, number]}
+          radius={bubbleRadius(p.count)}
+          pathOptions={{
+            color: "#EF3A4F",
+            fillColor: "#EF3A4F",
+            fillOpacity: 0.25,
+            weight: 2,
+            opacity: 0.6,
+          }}
+        >
           <Popup>
-            {p.label && (
-              <div className="text-xs font-semibold mb-1">{p.label}</div>
-            )}
+            <div className="text-xs font-semibold mb-1">{p.district}</div>
+            <div className="text-xs text-cordaid-muted">
+              {p.count.toLocaleString()} activities
+            </div>
             <div className="text-xs text-cordaid-muted">
               {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
             </div>
           </Popup>
-        </Marker>
+        </Circle>
       ))}
     </MapContainer>
   );
