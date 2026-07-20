@@ -1,6 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import L from "leaflet";
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BRAND, CHART_PALETTE } from "@/lib/constants";
 import { useMemo } from "react";
@@ -8,6 +12,7 @@ import type { ChartSpec, DynamicRecord, FormConfig } from "@/lib/types";
 import {
   ageDistribution,
   countBy,
+  parseGps,
   trendByDate,
 } from "@/lib/filters";
 
@@ -19,6 +24,23 @@ const ReactECharts = dynamic(() => import("echarts-for-react"), {
     </div>
   ),
 });
+
+const MapContainer = dynamic(
+  () => import("react-leaflet").then((m) => m.MapContainer),
+  { ssr: false },
+);
+const TileLayer = dynamic(
+  () => import("react-leaflet").then((m) => m.TileLayer),
+  { ssr: false },
+);
+const Marker = dynamic(
+  () => import("react-leaflet").then((m) => m.Marker),
+  { ssr: false },
+);
+const Popup = dynamic(
+  () => import("react-leaflet").then((m) => m.Popup),
+  { ssr: false },
+);
 
 interface ChartsProps {
   records: DynamicRecord[];
@@ -201,6 +223,62 @@ function buildDonutOption(
   };
 }
 
+// Fix Leaflet's default marker icon paths broken by webpack/Next.js
+// bundling. Without this, markers render as empty/broken images.
+delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x.src,
+  iconUrl: markerIcon.src,
+  shadowUrl: markerShadow.src,
+});
+
+function buildMapMarkerContent(
+  points: Array<{ lat: number; lng: number }>,
+) {
+  if (!points.length) {
+    return (
+      <div className="flex h-[300px] items-center justify-center text-xs text-cordaid-muted">
+        No GPS coordinates in the filtered records.
+      </div>
+    );
+  }
+  // Compute bounding box to auto-fit the map view.
+  let minLat = Infinity, maxLat = -Infinity;
+  let minLng = Infinity, maxLng = -Infinity;
+  for (const p of points) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = (minLng + maxLng) / 2;
+  // Increase zoom when points cluster tightly (distance < 0.1°).
+  const latSpread = maxLat - minLat;
+  const zoom = latSpread < 0.1 ? 12 : 8;
+
+  return (
+    <MapContainer
+      center={[centerLat, centerLng] as [number, number]}
+      zoom={zoom}
+      className="h-[300px] w-full rounded-lg"
+      scrollWheelZoom
+    >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      {points.map((p, i) => (
+        <Marker key={i} position={[p.lat, p.lng] as [number, number]}>
+          <Popup>
+            {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
+          </Popup>
+        </Marker>
+      ))}
+    </MapContainer>
+  );
+}
+
 function buildAgeBarOption(
   records: DynamicRecord[],
   ageColumn: string
@@ -263,6 +341,8 @@ function buildOptionForSpec(
       return buildDonutOption(records, spec.sourceColumn);
     case "age-bar":
       return buildAgeBarOption(records, spec.sourceColumn);
+    case "map":
+      return buildMapMarkerContent(parseGps(records, spec.sourceColumn));
   }
 }
 
@@ -294,6 +374,20 @@ function hasMatchingData(
 interface ChartConfig {
   title: string;
   build: () => unknown;
+}
+
+/**
+ * A map chart doesn't render via ECharts; it returns React elements
+ * directly. The render path below detects this by checking if the
+ * build() return is an object with a `$$typeof` symbol (React element)
+ * vs a plain options object.
+ */
+function isReactElement(value: unknown): value is React.ReactNode {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    "$$typeof" in (value as Record<string, unknown>)
+  );
 }
 
 export function Charts({ records, form }: ChartsProps) {
@@ -337,24 +431,31 @@ export function Charts({ records, form }: ChartsProps) {
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {charts.map((chart, idx) => (
-        <Card key={chart.title} className="animate-fade-in" style={{ animationDelay: `${idx * 30}ms` }}>
-          <CardHeader>
-            <CardTitle>{chart.title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="chart-shell">
-              <ReactECharts
-                option={chart.build() as object}
-                style={{ height: idx === 0 ? 320 : 280, width: "100%" }}
-                notMerge
-                lazyUpdate
-                opts={{ renderer: "svg" }}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      {charts.map((chart, idx) => {
+        const content = chart.build();
+        return (
+          <Card key={chart.title} className="animate-fade-in" style={{ animationDelay: `${idx * 30}ms` }}>
+            <CardHeader>
+              <CardTitle>{chart.title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="chart-shell">
+                {isReactElement(content) ? (
+                  content
+                ) : (
+                  <ReactECharts
+                    option={content as object}
+                    style={{ height: idx === 0 ? 320 : 280, width: "100%" }}
+                    notMerge
+                    lazyUpdate
+                    opts={{ renderer: "svg" }}
+                  />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </section>
   );
 }

@@ -72,7 +72,7 @@ export type Kpis = Record<string, string | number>;
 /**
  * Chart visualisation kinds. Mirrors what charts.tsx knows how to draw.
  */
-export type ChartType = "donut" | "horizontal-bar" | "age-bar" | "trend-line";
+export type ChartType = "donut" | "horizontal-bar" | "age-bar" | "trend-line" | "map";
 
 /**
  * One row in the form's filter strip. The FilterShell (filter-bar.tsx

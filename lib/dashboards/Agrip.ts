@@ -68,6 +68,7 @@ const LBL_PARTICIPANT_SECOND = "Second Name";
 const LBL_PHONE_TOP          = "phonenumber";                // bare-name: no label on metadata field
 const LBL_PHONE_CONTACT      = "Contact of Data Entrant";
 const LBL_PHONE_PARTICIPANT  = "Telephone contact";
+const LBL_GPS                = "Collect GPS coordinate.";
 
 export const Agrip: FormConfig = {
   id: "Agrip",
@@ -234,6 +235,11 @@ export const Agrip: FormConfig = {
       type: "horizontal-bar",
       sourceColumn: LBL_ACTIVITY_NAME,
       topN: 10,
+    },
+    {
+      title: "Activity locations",
+      type: "map",
+      sourceColumn: LBL_GPS,
     },
   ],
   tableColumns: [

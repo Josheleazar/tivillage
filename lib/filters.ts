@@ -385,6 +385,42 @@ export function yesNoVariant(v: Cell): "default" | "muted" {
 }
 
 /**
+ * Standalone GPS coordinate parser. Reads the `column` from each record
+ * — a Kobo `geopoint` question persists as a space-separated string
+ * (`"lat lng altitude accuracy"`) — and returns an array of parsed
+ * {lat, lng} pairs. Records whose cell is null, empty, or has fewer
+ * than 2 parseable numbers are silently dropped.
+ *
+ * Used by the map chart type to feed Leaflet markers. The result is
+ * memoised at the component level; calling it on every render on a
+ * 25k-record slice is cheap (string split + parseFloat) but we keep
+ * the data flow consistent with the existing useMemo wrapping pattern
+ * in charts.tsx.
+ */
+export interface GpsPoint {
+  lat: number;
+  lng: number;
+}
+
+export function parseGps(
+  records: DynamicRecord[],
+  column: string,
+): GpsPoint[] {
+  const out: GpsPoint[] = [];
+  for (const r of records) {
+    const v = r[column];
+    if (typeof v !== "string" || !v) continue;
+    const parts = v.trim().split(/\s+/).map(Number);
+    if (parts.length < 2) continue;
+    const lat = parts[0];
+    const lng = parts[1];
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    out.push({ lat, lng });
+  }
+  return out;
+}
+
+/**
  * Per-level options derived from records matching PRIOR levels.
  * Used by the drill-down renderer to populate each subsequent
  * dropdown's option list. Returns an alpha‑sorted, deduped string[].
