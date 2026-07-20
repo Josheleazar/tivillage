@@ -111,7 +111,11 @@ export function DashboardClient() {
   // filter values from the ref so the closure captures the latest state.
   useEffect(() => {
     let cancelled = false;
-    const isInitial = !aggregated;
+    // Treat as initial load when aggregated is null (first mount, browser
+    // refresh) OR when the form has changed since the last successful fetch
+    // (form selector switch). In both cases the filter state must be
+    // re-initialised from the new form's dateBounds.
+    const isInitial = !aggregated || aggregated.meta.source !== formKey;
     if (isInitial) {
       setLoading(true);
       setAggregated(null);
@@ -123,15 +127,20 @@ export function DashboardClient() {
 
     async function load() {
       try {
-        // Build URL: form + aggregated=true + current filter values
+        // Build URL: form + aggregated=true
         const params = new URLSearchParams();
         params.set("form", formKey);
         params.set("aggregated", "true");
-        let hasFilters = false;
-        for (const [k, v] of Object.entries(filtersRef.current)) {
-          if (v) {
-            params.set(k, v);
-            hasFilters = true;
+        // Only include filter params on re-fetches (filter changes / manual
+        // refresh). On initial load (browser refresh) and form switch, the
+        // ref still holds the old form's filter values which would pollute
+        // the new form's aggregation. The server should return unfiltered
+        // data so filters can be initialised from the response's dateBounds.
+        if (!isInitial) {
+          for (const [k, v] of Object.entries(filtersRef.current)) {
+            if (v) {
+              params.set(k, v);
+            }
           }
         }
 
