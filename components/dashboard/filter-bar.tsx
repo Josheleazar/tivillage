@@ -4,7 +4,7 @@ import { Search, RotateCcw, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { boundsForDateColumn, uniqueValues } from "@/lib/filters";
+import { boundsForDateColumn, drillOptionsForLevel, uniqueValues } from "@/lib/filters";
 import type { DynamicRecord, FilterDef, Filters, FormConfig } from "@/lib/types";
 
 interface FilterBarProps {
@@ -36,6 +36,7 @@ interface FilterBarProps {
 function spanClass(span: number | undefined): string {
   if (span === 2) return "lg:col-span-2";
   if (span === 3) return "lg:col-span-3";
+  if (span === 4) return "lg:col-span-4";
   return "";
 }
 
@@ -108,6 +109,49 @@ function FilterWidget({
             onChange={(e) => onChange({ [def.key]: e.target.value })}
             className="pl-9"
           />
+        </div>
+      </div>
+    );
+  }
+
+  // type === "drill" — cascading dependent selects
+  if (def.type === "drill") {
+    const levels = def.drillConfig!.levels;
+    return (
+      <div className={`flex flex-col gap-1 ${spanClass(def.span ?? 4)}`}>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-cordaid-muted">
+          {def.label}
+        </label>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {levels.map((lvl, i) => {
+            const value = filters[lvl.key] ?? "";
+            const opts = drillOptionsForLevel(records, levels, i, filters);
+            return (
+              <Select
+                key={lvl.key}
+                value={value}
+                onChange={(e) => {
+                  // Clear deeper levels on parent change so stale
+                  // selections don't survive a parent's reset.
+                  const next: Filters = {
+                    ...filters,
+                    [lvl.key]: e.target.value,
+                  };
+                  for (let j = i + 1; j < levels.length; j++) {
+                    next[levels[j].key] = "";
+                  }
+                  onChange(next);
+                }}
+              >
+                <option value="">All {lvl.label.toLowerCase()}s</option>
+                {opts.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Select>
+            );
+          })}
         </div>
       </div>
     );

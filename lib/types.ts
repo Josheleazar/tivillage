@@ -79,16 +79,33 @@ export type ChartType = "donut" | "horizontal-bar" | "age-bar" | "trend-line";
  * Step 8) renders one widget per FilterDef; the dashboard reads
  * `filters[def.key]` and `def.sourceColumn` for each.
  */
+/**
+ * One level in a drill-down cascade. Each level is a dependent select
+ * whose options are derived from records matching PRIOR levels' selected
+ * values. Cascade order: index 0 → N (e.g. District → Sub‑county →
+ * Parish → Village).
+ */
+export interface DrillLevel {
+  /** filter‑state key / URL marker. */
+  key: string;
+  /** Widget label. */
+  label: string;
+  /** Record column the level's options come from (post-rename label). */
+  sourceColumn: string;
+}
+
 export interface FilterDef {
   /** URL query-string key + state map key. */
   key: string;
   /** Renders as the widget's label. */
   label: string;
-  type: "select" | "date" | "search";
+  type: "select" | "date" | "search" | "drill";
   /** Record column the filter predicates against (label or snake case). */
   sourceColumn?: string;
-  /** Optional grid-span override (1..3). Default 1. */
+  /** Optional grid-span override (1..4). Default 1. */
   span?: number;
+  /** Required when type === "drill"; cascade order = top‑down. */
+  drillConfig?: { levels: DrillLevel[] };
 }
 
 /**

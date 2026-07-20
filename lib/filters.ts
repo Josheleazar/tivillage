@@ -1,5 +1,5 @@
 import { ageBucket } from "./utils";
-import type { Cell, DynamicRecord, FormConfig } from "./types";
+import type { Cell, DrillLevel, DynamicRecord, FormConfig } from "./types";
 
 // =============================================================================
 //  lib/filters.ts — form-aware filter + analytics helpers (Step 7).
@@ -131,13 +131,22 @@ export function applyFilters(
       }
     }
 
-    // Pass 2: select predicates.
+    // Pass 2: select predicates (including drill-down levels).
     for (const def of form.filters) {
-      if (def.type !== "select") continue;
-      if (!def.sourceColumn) continue;
-      const selected = filters[def.key];
-      if (!selected) continue;
-      if (r[def.sourceColumn] !== selected) return false;
+      if (def.type === "select") {
+        if (!def.sourceColumn) continue;
+        const selected = filters[def.key];
+        if (!selected) continue;
+        if (r[def.sourceColumn] !== selected) return false;
+      }
+      if (def.type === "drill") {
+        if (!def.drillConfig) continue;
+        for (const level of def.drillConfig.levels) {
+          const selected = filters[level.key];
+          if (!selected) continue;
+          if (r[level.sourceColumn] !== selected) return false;
+        }
+      }
     }
 
     // Pass 3: free-text search (over form.searchFields only — no
@@ -373,5 +382,44 @@ export function statusVariant(status: Cell): "success" | "warning" | "muted" {
  */
 export function yesNoVariant(v: Cell): "default" | "muted" {
   return v === "Yes" ? "default" : "muted";
+}
+
+/**
+ * Per-level options derived from records matching PRIOR levels.
+ * Used by the drill-down renderer to populate each subsequent
+ * dropdown's option list. Returns an alpha‑sorted, deduped string[].
+ *
+ * For example: `drillOptionsForLevel(records, levels, 2, filters)`
+ * returns unique parish names from records where
+ *   filters[levels[0].key] matches r[levels[0].sourceColumn]
+ *   AND filters[levels[1].key] matches r[levels[1].sourceColumn].
+ * If levelIndex === 0, priorLevels is [] and the function returns
+ * unique values across the full records slice (no prior narrowing).
+ */
+export function drillOptionsForLevel(
+  records: DynamicRecord[],
+  levels: DrillLevel[],
+  levelIndex: number,
+  filters: Record<string, string>,
+): string[] {
+  // Narrow records to those matching ALL prior levels' selected values.
+  const candidates = records.filter((r) => {
+    for (let i = 0; i < levelIndex; i++) {
+      const lvl = levels[i];
+      const selected = filters[lvl.key];
+      if (!selected) continue;
+      if (r[lvl.sourceColumn] !== selected) return false;
+    }
+    return true;
+  });
+
+  // Collect unique values for the current level's sourceColumn.
+  const set = new Set<string>();
+  for (const r of candidates) {
+    const v = r[levels[levelIndex].sourceColumn];
+    if (v == null || v === "") continue;
+    set.add(String(v));
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 

@@ -10,6 +10,7 @@
 // =============================================================================
 
 import type { FormConfig } from "@/lib/types";
+import { Agrip } from "./Agrip";
 import { cordaidDemo } from "./cordaidDemo";
 import { Wework } from "./Wework";
 
@@ -20,6 +21,7 @@ import { Wework } from "./Wework";
  */
 export const registry: Record<string, FormConfig> = {
   cordaidDemo,
+  Agrip,
   Wework,
 };
 
