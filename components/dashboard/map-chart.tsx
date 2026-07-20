@@ -75,11 +75,15 @@ export function MapChart({ points }: MapChartProps) {
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      {points.map((p, i) => (
+      />        {points.map((p, i) => (
         <Marker key={i} position={[p.lat, p.lng] as [number, number]}>
           <Popup>
-            {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
+            {p.label && (
+              <div className="text-xs font-semibold mb-1">{p.label}</div>
+            )}
+            <div className="text-xs text-cordaid-muted">
+              {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
+            </div>
           </Popup>
         </Marker>
       ))}

@@ -240,6 +240,7 @@ export const Agrip: FormConfig = {
       title: "Activity locations",
       type: "map",
       sourceColumn: LBL_GPS,
+      mapLabelColumns: [LBL_ACTIVITY_NAME, LBL_PRIMARY_DISTRICT],
     },
   ],
   tableColumns: [

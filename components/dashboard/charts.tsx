@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BRAND, CHART_PALETTE } from "@/lib/constants";
 import { useMemo } from "react";
 import type { ChartSpec, DynamicRecord, FormConfig } from "@/lib/types";
+import type { GpsPoint } from "@/lib/filters";
 import {
   ageDistribution,
   countBy,
@@ -208,7 +209,7 @@ function buildDonutOption(
 }
 
 function buildMapMarkerContent(
-  points: Array<{ lat: number; lng: number }>,
+  points: GpsPoint[],
 ) {
   return <MapChart points={points} />;
 }
@@ -276,7 +277,9 @@ function buildOptionForSpec(
     case "age-bar":
       return buildAgeBarOption(records, spec.sourceColumn);
     case "map":
-      return buildMapMarkerContent(parseGps(records, spec.sourceColumn));
+      return buildMapMarkerContent(
+        parseGps(records, spec.sourceColumn, spec.mapLabelColumns),
+      );
   }
 }
 

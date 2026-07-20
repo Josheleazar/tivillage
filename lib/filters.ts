@@ -400,11 +400,21 @@ export function yesNoVariant(v: Cell): "default" | "muted" {
 export interface GpsPoint {
   lat: number;
   lng: number;
+  /** Optional human-readable label displayed in the marker popup. */
+  label?: string;
 }
 
+/**
+ * Parses space-separated Kobo geopoint strings into `GpsPoint[]`.
+ * When `labelColumns` is provided, extracts values from those columns
+ * on the same record and joins them with " · " as the point's label.
+ * Records whose GPS column is null, empty, or unparseable are silently
+ * dropped (along with their label data).
+ */
 export function parseGps(
   records: DynamicRecord[],
   column: string,
+  labelColumns?: string[],
 ): GpsPoint[] {
   const out: GpsPoint[] = [];
   for (const r of records) {
@@ -415,7 +425,17 @@ export function parseGps(
     const lat = parts[0];
     const lng = parts[1];
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    out.push({ lat, lng });
+    const point: GpsPoint = { lat, lng };
+    if (labelColumns?.length) {
+      const labelParts = labelColumns
+        .map((col) => {
+          const lv = r[col];
+          return typeof lv === "string" && lv ? lv : "";
+        })
+        .filter(Boolean);
+      if (labelParts.length) point.label = labelParts.join(" · ");
+    }
+    out.push(point);
   }
   return out;
 }

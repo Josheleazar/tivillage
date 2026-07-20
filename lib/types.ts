@@ -119,6 +119,12 @@ export interface ChartSpec {
   sourceColumn: string;
   /** Optional cap for horizontal-bar charts (default 15). */
   topN?: number;
+  /**
+   * Optional label columns for map chart markers. When set, each marker's
+   * popup displays the concatenated values of these columns from the same
+   * record alongside the lat/lng coordinates.
+   */
+  mapLabelColumns?: string[];
 }
 
 /**
