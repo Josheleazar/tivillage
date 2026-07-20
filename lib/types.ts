@@ -287,6 +287,74 @@ export interface FormConfig {
 }
 
 // -----------------------------------------------------------------------------
+//  Option D aggregate response shapes — pre-computed payloads returned by
+//  GET /api/feedback?aggregated=true. The server builds KPIs, chart options,
+//  filter options, date bounds, and a paginated record slice from the cached
+//  Kobo set so the client never iterates the full 61k-record dataset.
+// -----------------------------------------------------------------------------
+
+/**
+ * One district bubble for the map chart. The server groups GPS records
+ * by district field, computes the centroid (avg lat/lng) and record
+ * count for each group. The client renders one circle marker per bubble,
+ * sized by `count`, instead of plotting 61k individual GPS points.
+ */
+export interface DistrictBubble {
+  district: string;
+  lat: number;
+  lng: number;
+  count: number;
+}
+
+/**
+ * Pre-computed chart option payload. Each chart spec in the form's
+ * registry produces one of these. The ECharts option objects are built
+ * server-side so the client just feeds them to `<ReactECharts option={...} />`
+ * without re-iterating the record set.
+ *
+ * Map charts are the exception: `option` is null and the visual data
+ * lives in `districtBubbles` instead, which the client renders via
+ * the `<MapChart>` component (not ECharts).
+ */
+export interface ChartOptionPayload {
+  title: string;
+  type: ChartType;
+  /** Pre-built ECharts option (JSON-serializable). Null for map charts. */
+  option: Record<string, unknown> | null;
+  /** Only present when type === "map". Pre-computed district bubbles. */
+  districtBubbles?: DistrictBubble[];
+}
+
+/**
+ * Top-level aggregated response from GET /api/feedback?aggregated=true.
+ * The server pre-computes everything the dashboard needs to render
+ * KPIs, charts, filter widgets, the records table, and the map — all
+ * from a single ~50KB payload instead of 5–10MB of raw records.
+ */
+export interface AggregatedResponse {
+  aggregated: true;
+  totalCount: number;
+  kpis: Record<string, string | number>;
+  charts: ChartOptionPayload[];
+  /** Per-FilterDef.key select/drill option lists, pre-computed server-side. */
+  filterOptions: Record<string, string[]>;
+  /**
+   * Pre-computed drill-down cascade options, keyed by DrillLevel.key.
+   * Present only when the form has drill-down filters. The server
+   * computes each level's options from records matching prior levels.
+   */
+  drillOptions?: Record<string, string[]>;
+  dateBounds: { min: string; max: string };
+  /**
+   * First page of filtered records for the feedback table and detail
+   * drawer. Currently 500 records (~250KB). Pagination fetches
+   * subsequent pages via ?aggregated=true&page=2.
+   */
+  records: DynamicRecord[];
+  meta: ApiMeta;
+}
+
+// -----------------------------------------------------------------------------
 // API response shapes (unchanged shape, slightly broadened union).
 // -----------------------------------------------------------------------------
 
