@@ -9,9 +9,7 @@ import { FeedbackTable } from "@/components/dashboard/feedback-table";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { KpiCards } from "@/components/dashboard/kpi-cards";
 import {
-  downloadCsv,
   emptyFiltersForForm,
-  toCsv,
 } from "@/lib/filters";
 import type { AggregatedResponse, DynamicRecord, Filters } from "@/lib/types";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -195,12 +193,16 @@ export function DashboardClient() {
   }
 
   function exportCsv() {
-    if (!aggregated || !aggregated.records.length) return;
-    const date = new Date().toISOString().slice(0, 10);
-    downloadCsv(
-      `${formKey}-feedback-${date}.csv`,
-      toCsv(aggregated.records, form),
-    );
+    if (!aggregated) return;
+    const params = new URLSearchParams({ form: formKey });
+    for (const [k, v] of Object.entries(filtersRef.current)) {
+      if (v) params.set(k, v);
+    }
+    // Programmatic <a> click avoids popup blockers and triggers an
+    // immediate CSV download from the server.
+    const a = document.createElement("a");
+    a.href = `/api/feedback/export?${params}`;
+    a.click();
   }
 
   // Operator-driven refresh.
