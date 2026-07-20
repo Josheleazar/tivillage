@@ -65,7 +65,7 @@ These checks run BEFORE any code is written. They depend only on
 files already on disk (`/tmp/agrip_content.json`,
 `/tmp/agrip_data.json`) — no fetch needed.
 
-### B.1 — Verify the exact post‑rename label strings — VERIFIED 2026‑07‑19 from `/tmp/agrip_content_NOW.json`
+### B.1 — Verify the exact post‑rename label strings — VERIFIED 2026‑07‑20 from E2E `/api/feedback?form=Agrip`
 
 The `form.filters[N].sourceColumn` values and the
 `form.charts[N].sourceColumn` values must reference **exactly** what
@@ -76,7 +76,7 @@ exact label text Kobo serves on the live asset UID
 | Field purpose | survey row name | `label::English` (ACTUAL) | post-rename cell-key |
 |---|---|---|---|
 | Primary district | (top‑level) `district` | `"Seclect Current District"` ⚠ typo carried over from the original Kobo upload | `"Seclect Current District"` |
-| Activity district | (group) `district_001` | `"District"` (the rename to `"Activity district"` did **NOT** propagate to live) | `"District"` |
+| Activity district | (group) `district_001` | `"Activity district"` (rename propagated successfully) | `"Activity district"` |
 | Activity name | `activity_name` | `"Activity name"` | `"Activity name"` |
 | Activity date | `activity_date` | `"Activity date"` | `"Activity date"` |
 | Participant gender | `gender` | `"Gender"` | `"Gender"` |
@@ -94,13 +94,10 @@ exact label text Kobo serves on the live asset UID
 | Participant second | `participant_second_name` | `"Second Name"` | `"Second Name"` |
 | Location | (group) `location` | `"Collect GPS coordinate."` | `"Collect GPS coordinate."` |
 
-**Two labels that need Kobo-side fixes (forward-looking):**
+**One remaining Kobo-side fix (forward-looking):**
 
 - `"Seclect Current District"` typo on top-level `district` — fix in
   the form-builder UI to `"Select Current District"`.
-- `"District"` on `activity_details/district_001` should be `"Activity
-  district"` per the user's intent — fix in the form-builder UI; the
-  on-disk xlsx edit didn't propagate through Kobo's upload pipeline.
 
 **Distinction between "post-rename cell-key" and "pre-rename" snapshots:**
 
@@ -110,6 +107,10 @@ that patch ships, the walker registers the bare `name` as the cell
 key (e.g. `"Seclect Current District"` → walker falls back to
 `"district"`). The post-rename column assumes the walker fix is
 deployed.
+
+**Update 2026-07-20:** E2E verification confirmed both the walker fix
+and the xlsx rename landed correctly. All cell-keys above match
+live `/api/feedback?form=Agrip` output.
 
 ### B.2 — Verify Activity date value shape
 
@@ -121,31 +122,26 @@ slicing to first 10 chars in `lib/filters.ts:normalizeDate` works),
 or `"19/07/2026"` (FAILS — cell becomes null silently). If shape is
 not YYYY-MM-DD-anchored, extend normalisation in `lib/filters.ts`.
 
-### B.3 — Verify the two-district labels are distinct — VERIFIED 2026‑07‑19
+### B.3 — Verify the two-district labels are distinct — VERIFIED 2026‑07‑20
 
 The schema walker uses `nameToLabel[path] = label` as the cell‑key
 registration. The `path` for both districts differs (top‑level vs
 `activity_details/district_001`).
 
-**Live state observed on `/content/`:**
+**Live state observed on `/content/` (post-rename):**
 
-- top‑level `district` → label `"Seclect Current District"`
-- `activity_details/district_001` → label `"District"` (rename didn't propagate)
+- top‑level `district` → label `"Seclect Current District"` (typo)
+- `activity_details/district_001` → label `"Activity district"` (rename propagated)
 
 **VERDICT: SATISFACTORILY DISTINCT post-deploy.** `"Seclect Current District"` ≠
-`"District"`. The cell-key collision concern is structurally nullified
-by the Kobo-side wording difference — even though our intended rename
-to `"Activity district"` did not propagate, the two cell-keys WILL
-be distinct because they're different strings. The dashboard's
-primary-district chart will show respondent-district data; the
-second chart will show activity-district data. **No silent
-overwrite.**
+`"Activity district"`. The cell-key collision concern is structurally
+nullified — the two cell-keys are distinct strings (even after the
+typography fix, they'll be `"Select Current District"` vs
+`"Activity district"`). **No silent overwrite.**
 
-Forward-looking: when the user re-edits the form builder UI to rename
-`district_001` to `"Activity district"` AND fixes the `"Seclect"`
-typo to `"Select"`, the labels become semantically distinct AND
-clean. Until then, the dashboard works, just with the typo and the
-generic "District" label on the activity location.
+Forward-looking: fix the `"Seclect"` typo to `"Select"` in the
+form-builder UI. The dashboard works with or without the fix; it just
+surfaces the typo as-is.
 
 ### B.4 — Verify the enum coercion helpers cover PWD — VERIFIED 2026‑07‑19
 
@@ -343,11 +339,11 @@ import type { DynamicRecord, FormConfig } from "@/lib/types";
 
 // =============================================================================
 //  LBL_* constants EXACTLY match what Kobo serves via label::English on the
-//  live asset `aiJYFaTY5WKVwCyQySjaYw` (verified 2026-07-19). If Kobo's label
+//  live asset `aiJYFaTY5WKVwCyQySjaYw` (verified 2026-07-20 post-rename). If Kobo's label
 //  changes in the form builder, ONLY this block needs updating.
 // =============================================================================
 const LBL_PRIMARY_DISTRICT  = "Seclect Current District";   // ⚠ typo preserved from xlsx — fix in Kobo UI
-const LBL_ACTIVITY_DISTRICT = "District";                   // rename to "Activity district" didn't propagate
+const LBL_ACTIVITY_DISTRICT = "Activity district";          // rename propagated successfully
 const LBL_ACTIVITY_NAME     = "Activity name";
 const LBL_ACTIVITY_DATE     = "Activity date";
 const LBL_ACTIVITY_SUBCOUNTY = "Sub-county / Town Council";
@@ -558,7 +554,7 @@ satisfied). Typecheck + reviewer run in parallel before commit.
 
 | # | Risk | L | I | Mitigation |
 |---|---|---|---|---|
-| 1 | Two-district label collision (`activity_details/district_001` and top-level `district` both labelled "District") → schema walker overwrites cell-key → "By activity location" chart silently shows respondent district data | **MITIGATED** | RESOLVED | **§B.3 verified:** live labels are now `"Seclect Current District"` (top) vs `"District"` (activity) — distinct strings, no overwrite risk. Forward-looking: rename in form-builder UI to `"Activity district"` + fix `"Seclect"`→`"Select"`. |
+| 1 | Two-district label collision (`activity_details/district_001` and top-level `district` both labelled "District") → schema walker overwrites cell-key → "By activity location" chart silently shows respondent district data | **MITIGATED** | **RESOLVED** | **§B.3 verified:** live labels are now `"Seclect Current District"` (top) vs `"Activity district"` (activity) — rename propagated, no overwrite risk. Forward-looking: fix `"Seclect"`→`"Select"`. |
 | 2 | Drill‑down stale deeper‑level state on parent reset → "Village = X" persists past a parent reset to a different district → filter excludes records where parish/village are valid for the new district | MED | MED | Renderer in §D.4 clears deeper levels on parent change. Local UX risk; not a data risk. |
 | 3 | PWD label exact spelling — FormConfig literal `LBL_PWD = "Participant is a PWD"` (verified 2026‑07‑19) matches the survey-row's `label::English` exactly | LOW | LOW | **§B.4 verified.** Confirmed live label `"Participant is a PWD"`. Chip dispatch (`chip: "yesNo"`) will fire on the table + drawer once §C.4 walker fix lands and cell key becomes label-shaped. |
 | 4 | Activity date shape — if Kobo returns `"2026-07-19T00:00:00"` or `"19/07/2026"`, `lib/kobo.ts:144` rejects non-YYYY-MM-DD cells → trend chart shows zero series | MED | HIGH | §B.2 verification + extend `normalizeDate` (lib/filters.ts:78–85) to tolerate ISO datetime via slice(0,10) — the existing helper ALREADY DOES THIS for the dateBounds side, but the dateLabels-validated cell-drop is a separate path; an explicit test on a real record is required. |
@@ -583,7 +579,7 @@ Two additional smaller risks:
 
 ## H. Open questions (for human input BEFORE implementation)
 
-1. **Two-district labels** — **resolved structurally** (live emits `"Seclect Current District"` vs `"District"`, distinct). Forward-looking: re-rename the activity-district row to `"Activity district"` + fix the `"Seclect"` typo. Pure form-builder edit, no code change. Optional cleanup, not blocking.
+1. **Two-district labels** — **resolved structurally** (live emits `"Seclect Current District"` vs `"Activity district"`, distinct). Forward-looking: fix the `"Seclect"` typo to `"Select"`. Pure form-builder edit, no code change. Optional cleanup, not blocking.
 2. **`name_` field semantics** — is the 59-item list enumerator‑
    chosen respondent‑category, participant‑name lookup, or
    something else? This affects whether `LBL_NAME` should be a chart
