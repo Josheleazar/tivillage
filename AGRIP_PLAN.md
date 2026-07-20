@@ -439,6 +439,7 @@ inclusion metrics, (d) data‑quality red flag, (e) reach diversity.
 | Age group distribution | donut | LBL_AGE_GROUP | Youth (18-35) mandate proof |
 | PWD proportion | donut | LBL_PWD | Inclusion metric visualisation |
 | Activity name — Top 10 | horizontal-bar | LBL_ACTIVITY_NAME | Which activities dominate? |
+| Activity locations | map | LBL_GPS | Interactive Leaflet map plotting participant GPS coordinates; popups show activity name · district via `mapLabelColumns` |
 
 ### E.3 — TableColumns (8 columns — locked)
 
