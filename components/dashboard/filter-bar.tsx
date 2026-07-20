@@ -4,25 +4,19 @@ import { Search, RotateCcw, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { boundsForDateColumn, drillOptionsForLevel, uniqueValues } from "@/lib/filters";
-import type { DynamicRecord, FilterDef, Filters, FormConfig } from "@/lib/types";
+import type { FilterDef, Filters, FormConfig } from "@/lib/types";
 
 interface FilterBarProps {
   filters: Filters;
   /**
-   * PRE-FILTER records used to populate dropdown option sets + the
-   * date-input min/max bounds. FilterBar is a pure filter-input
-   * widget — it does not filter records itself; DashboardClient
-   * owns the applyFilters call.
+   * Pre-computed filter option sets from the server aggregation.
+   * Keyed by FilterDef.key (for select filters) and by DrillLevel.key
+   * (for drill-down cascade levels).
    */
-  records: DynamicRecord[];
-  /**
-   * Per-form spec driving every widget. Step 8 replaces the legacy
-   * `FILTER_DEFS` import from lib/constants.ts with this prop
-   * so each form declares its own widget set without edits here.
-   * Adding a third form is one new lib/dashboards/<id>.ts entry —
-   * zero edits to this file.
-   */
+  filterOptions: Record<string, string[]>;
+  /** Pre-computed date bounds from the server aggregation. */
+  dateBounds: { min: string; max: string };
+  /** Per-form spec driving every widget. */
   form: FormConfig;
   onChange: (next: Filters) => void;
   onReset: () => void;
@@ -42,33 +36,34 @@ function spanClass(span: number | undefined): string {
 
 /**
  * Renders one filter widget per FilterDef. Branches on `def.type`
- * so select / date / search widgets dispatch without per-form
- * code paths.
+ * so select / date / search / drill widgets dispatch without per-form
+ * code paths. Receives pre-computed `filterOptions` and `dateBounds`
+ * instead of raw records — no client-side record iteration.
  */
 function FilterWidget({
   def,
   filters,
-  records,
-  bounds,
+  filterOptions,
+  dateBounds,
   onChange,
 }: {
   def: FilterDef;
   filters: Filters;
-  records: DynamicRecord[];
-  bounds: { min: string; max: string };
+  filterOptions: Record<string, string[]>;
+  dateBounds: { min: string; max: string };
   onChange: (next: Filters) => void;
 }) {
   if (def.type === "date") {
     const value =
       def.key === "startDate"
-        ? filters.startDate || bounds.min
-        : filters.endDate || bounds.max;
+        ? filters.startDate || dateBounds.min
+        : filters.endDate || dateBounds.max;
     const min =
       def.key === "startDate"
-        ? bounds.min
-        : filters.startDate || bounds.min;
+        ? dateBounds.min
+        : filters.startDate || dateBounds.min;
     const max =
-      def.key === "endDate" ? bounds.max : filters.endDate || bounds.max;
+      def.key === "endDate" ? dateBounds.max : filters.endDate || dateBounds.max;
     return (
       <div className={`flex flex-col gap-1 ${spanClass(def.span)}`}>
         <label className="text-[11px] font-semibold uppercase tracking-wide text-cordaid-muted">
@@ -86,11 +81,6 @@ function FilterWidget({
   }
 
   if (def.type === "search") {
-    // Cordaid used a wide, custom placeholder ("Search feedback,
-    // action taken, respondent, activity, village…") so users know
-    // the scope. Step 8 keeps the Cordaid placeholder for parity and
-    // falls back to a generic phrasing for other forms' search wid-
-    // gets (today only WeWork has a search widget).
     const placeholder =
       def.key === "search"
         ? "Search feedback, action taken, respondent, activity, village…"
@@ -114,7 +104,8 @@ function FilterWidget({
     );
   }
 
-  // type === "drill" — cascading dependent selects
+  // type === "drill" — cascading dependent selects. Options come from
+  // the pre-computed filterOptions keyed by DrillLevel.key.
   if (def.type === "drill") {
     const levels = def.drillConfig!.levels;
     return (
@@ -125,7 +116,7 @@ function FilterWidget({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {levels.map((lvl, i) => {
             const value = filters[lvl.key] ?? "";
-            const opts = drillOptionsForLevel(records, levels, i, filters);
+            const opts = filterOptions[lvl.key] ?? [];
             return (
               <Select
                 key={lvl.key}
@@ -158,8 +149,7 @@ function FilterWidget({
   }
 
   // type === "select"
-  const column = def.sourceColumn ?? def.key;
-  const options = uniqueValues(records, column);
+  const options = filterOptions[def.key] ?? [];
   const value = filters[def.key] ?? "";
   return (
     <div className={`flex flex-col gap-1 ${spanClass(def.span)}`}>
@@ -183,21 +173,13 @@ function FilterWidget({
 
 export function FilterBar({
   filters,
-  records,
+  filterOptions,
+  dateBounds,
   form,
   onChange,
   onReset,
   onExport,
 }: FilterBarProps) {
-  // Bounds derived from the active form's dateColumn. Routed through
-  // lib/filters.ts:s boundsForDateColumn so the startDate/endDate
-  // defaults DashboardClient writes into filter state use the SAME
-  // day-level YYYY-MM-DD normalisation as the per-widget min/max con-
-  // straints below — without the shared helper, the two sites could
-  // drift (e.g. WeWork's _submission_time storing "2026-07-08T…" in
-  // state while the widget computes "2026-07-08" for min).
-  const bounds = boundsForDateColumn(records, form.dateColumn);
-
   return (
     <section className="rounded-2xl border border-cordaid-border bg-cordaid-cream/70 p-4 shadow-sm">
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -206,8 +188,8 @@ export function FilterBar({
             key={def.key}
             def={def}
             filters={filters}
-            records={records}
-            bounds={bounds}
+            filterOptions={filterOptions}
+            dateBounds={dateBounds}
             onChange={onChange}
           />
         ))}
