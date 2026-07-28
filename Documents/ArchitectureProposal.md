@@ -48,7 +48,6 @@ Josh's working stack maps directly to the proposed deliverable:
 
 Two of these matter disproportionately for Cordaid:
 
-- **English + French**. Cordaid works across anglophone and francophone Africa. Donor reporting is in English; field staff, partners, and external viewers may operate in French. Bilingual delivery capability ensures UAT, administrator training, partner onboarding, and ongoing user support are not gate-locked on language, while keeping the technical and donor-facing deliverables in English per Cordaid's HQ reporting standard.
 - **Lean engineering rhythm under a tight timeline.** Cordaid's 15-working-day build window is tight. The proposed methodology front-loads reusable boilerplate templates, expands test coverage via a curated fixtures library, keeps dependency evidence in a pinned lockfile, and hardens the schema-walker through a documented catalogue of shape-drift modes. The output is enterprise-grade modular logic with complete documentation, without trading depth for speed.
 
 ### 2.2 Production Reference Implementation (de-risked by what already exists)
@@ -134,7 +133,7 @@ This separation gives Cordaid three independent upgrade paths and four independe
 │   • cordaid                │                  │  - pg-adapter binds to   │
 │   • wework                 │                  │    shared Neon roles     │
 │   • agrip                  │                  │  - 5 Cordaid roles       │
-│                            │                  │  - TOTP MFA              │
+│                            │                  │                          │
 │  per-tenant tables:        │                  │  - audit logging         │
 │   • raw submissions        │                  └────────────┬─────────────┘
 │   • clean submissions      │                               │
@@ -182,7 +181,7 @@ This separation gives Cordaid three independent upgrade paths and four independe
 | Hosting | One Vercel Pro account hosting three Vercel projects | Each Cordaid application is its own Vercel project fed by its own GitHub repository, with its own production domain, its own deployment pipeline, and its own env-var scope. Projects stay in lock-step by importing the same `@cordaid/dashboard-core` package from a Cordaid-owned shared core repository that publishes to a private GitHub Packages registry inside the same Cordaid GitHub organisation, with Renovate-driven dependency-update PRs and CI gating on stale pins. |
 | Data viz | ECharts (dynamic-imported) + Leaflet (per-tenant bundle split) | Performance-tuned; bundle remains outside the SSR path. |
 | Auth | Auth.js v5 (NextAuth) with `@auth/pg-adapter` to Neon Postgres | Server-side sessions; revocable; Cordaid-owned; no third-party identity lock-in. |
-| Auth providers | Credentials (email + password + TOTP MFA) + OAuth (Google + Microsoft) | Covers Cordaid staff with corporate credentials; supports external partners with Google or Microsoft identity without giving them a Cordaid-managed password. |
+| Auth providers | Credentials (email + password) + OAuth (Google + Microsoft) | Covers Cordaid staff with corporate credentials; supports external partners with Google or Microsoft identity without giving them a Cordaid-managed password. |
 | Database | Neon Postgres (serverless driver, pooled), Launch plan | Per-tenant schema isolation; 7-day point-in-time recovery; branching for preview and staging. |
 | Background sync | GitHub Actions scheduled workflow (5–15 minute cadence, per-tenant fan-out) | Free tier covers ~2,000 min/mo, of which the 10-minute cadence predicts ~4,320 min/mo; a predictable, transparent overage sits the SLA without resorting to external schedulers. |
 | Object store | R2-compatible bucket (CSV export payloads only) | Cheap, Cordaid-controlled, 30-day TTL for exports. |
@@ -203,11 +202,11 @@ The reference implementation's `FormConfig` registry pattern is preserved end-to
 1. **`cordaid-dashboard-core` (Cordaid-owned) is a published library package, not a Next.js app.** It compiles to the `@cordaid/dashboard-core` npm artifact via `npm publish` into a private GitHub Packages registry inside the Cordaid GitHub organisation. It never produces a `next build` of its own and deliberately has **no** `next.config`, **no** `app/` directory, **no** page routes, **no** API routes. Its contents are:
    - The `FormConfig` registry catalogue: typed objects describing every visible dashboard surface (date column, search fields, filter widgets, KPI tiles, chart specs, table columns, drill-down cascades, badge/chip styling, detail-drawer header content).
    - Shared React primitives: chart wrappers around ECharts, map wrappers around Leaflet, tables, KPI tiles, filter widgets, drill-down cascade components, layout shells, RBAC-aware UI guards.
-   - Auth.js v5 helpers: server-side session validator, RBAC enforcement on UI rendering, the credentials + TOTP login form, the OAuth callback handler, the logout server action.
+   - Auth.js v5 helpers: server-side session validator, RBAC enforcement on UI rendering, the email-and-password login form, the OAuth callback handler, the logout server action.
    - Sync-engine primitives: KoboToolbox pagination, normalisation, schema-walker, indicator validation, small-cell suppression, idempotent rebuild.
    - Compliance helpers: `audit_log` and `refresh_log` row shapes, structured-log emission helpers.
 
-2. **`cordaid-feedback`, `cordaid-wework`, `cordaid-agrip` (Cordaid-owned) are each a full Next.js 14 application.** Each contains:
+2. **`cordaid-feedback-dashboard`, **`wework-partnerreach-dashboard`, **`agrip-activities-dashboard` (Cordaid-owned application repositories) are each a full Next.js 14 application.** The `-dashboard` suffix on each repository name distinguishes those Next.js *applications* (software) from the Cordaid-owned *KoboToolbox assets* they consume (the `'Cordaid feedback asset'`, `'WeWork partner-reach asset'`, and `'AGRIP activities-and-participants asset'` referenced in §3.2 and §5). Each application contains zero or more asset bindings via its FormConfig; each asset belongs to exactly one application under §3.4's schema-per-tenant isolation. Each contains:
    - A complete Next.js 14 App Router structure (`app/` directory with page routes, layouts, error pages, middleware).
    - Its own `next.config.mjs` and `package.json`, with `@cordaid/dashboard-core` pinned to an agreed minimum version.
    - Its own FormConfig object: declaring one or more KoboToolbox asset bindings (asset UIDs, schema-version per asset, and an adapter per asset) plus the role bindings and per-app metadata for this application.
@@ -242,13 +241,13 @@ The brief's §4 *Intended Users and Decision Needs* defines five role families. 
 
 External viewers carry an additional `scope` JSONB column with their assigned geography, portfolio, or partner attribution, used by the per-request scope guard. Out-of-scope rows return 403.
 
-### 4.2 Identity lifecycle and multi-factor authentication
+### 4.2 Identity lifecycle and password authentication
 
 - **Password policy.** Minimum 14 characters, NIST-compliant (no scheduled forced rotation; rotated upon evidence of compromise). argon2id with 64 MB memory, 3 iterations, parallelism 1, per OWASP guidance.
-- **MFA.** TOTP authenticator (Google Authenticator, Microsoft Authenticator, Authy) is mandatory for Senior Management, Project Manager, and MERL/Data roles; optional for External Viewer. Ten one-time recovery codes are issued at first login, each stored as an argon2id hash in the database.
+- **No multi-factor authentication.** Cordaid's chosen posture for this build is email and password only. TOTP, third-party authenticator apps, and recovery codes are intentionally out of scope, to keep the user path lean and to avoid additional vendor dependencies. The compensating controls are the breach-response workflow at the bottom of this section and the rate-limiting plus breach-list checks documented in §11 R4.
 - **Session lifecycle.** `httpOnly`, `Secure`, `SameSite=Lax` cookies; 8-hour sliding session for staff roles; 4-hour sliding for external partners; absolute expiry at 30 days regardless of activity. Sessions are server-side (no JWT-stored permissions), so Cordaid ICT can revoke any session at any time.
-- **Provider strategy.** Credentials (email + TOTP) is the primary provider, so Cordaid owns identity end-to-end. OAuth via Google Workspace and Microsoft Entra ID is offered for partner organisations with corporate identity.
-- **Audit.** Every authentication event (success, failure, MFA challenge, role change, password change, account lockout) writes a structured row to `audit_log`. See §8.1 for the storage policy.
+- **Provider strategy.** Credentials (email + password) is the primary provider, so Cordaid owns identity end-to-end. OAuth via Google Workspace and Microsoft Entra ID is offered for partner organisations with corporate identity.
+- **Audit.** Every authentication event (success, failure, role change, password change, password reset, account lockout) writes a structured row to `audit_log`. See §8.1 for the storage policy.
 
 ### 4.3 RBAC matrix: Action × Role
 
@@ -394,7 +393,7 @@ The performance smoke at Day 13 (D4 in §9) measures compliance with the brief's
 | Brief requirement | How this proposal satisfies it |
 |---|---|
 | HTTPS | Vercel TLS termination; HSTS preload; max-age 1 year. |
-| Protected server-side secrets | Vercel env, never exposed via `NEXT_PUBLIC_*`; Kobo tokens rotated quarterly; TOTP secrets encrypted at rest (`pgcrypto`); GitHub Repo Secrets for the sync workflow webhook. |
+| Protected server-side secrets | Vercel env, never exposed via `NEXT_PUBLIC_*`; Kobo tokens rotated quarterly; password hashes argon2id with per-user salt (one-way, no encryptable plaintext at rest); GitHub Repo Secrets for the sync workflow webhook. |
 | Least privilege | Per-tenant Postgres roles; per-tenant webhook secret; per-section middleware on `/api/*`. |
 | Secure sessions | Auth.js v5 server-side sessions; `httpOnly`, `Secure`, `SameSite=Lax` cookies; sliding 8 h / absolute 30 d. |
 | Validation + dependency review | Zod schemas at every API boundary; weekly dependency-review scan; `pnpm audit` in CI. |
@@ -475,10 +474,10 @@ One-time costs (design, build, handover, training, 30-day warranty) are priced s
 | R1 | Kobo schema drift in production breaks sync silently | Medium | High | Schema hash stored per tenant; on drift, previous aggregates retained read-only, dashboard shows version-mismatch banner, MERL approves before re-applying schema; new submissions skip drift-affected labels until re-approval. |
 | R2 | Neon → Vercel egress costs exceed budget at scale | Low | Medium | Edge-cache `?aggregated=true&hash=…` for 60 s; aggregation clustering by filter_hash reduces duplicate egress. |
 | R3 | GitHub Actions double-tick overlap | Low | Medium | Postgres advisory lock at sync start; if locked, return immediately. |
-| R4 | MFA assumption wrong for some Cordaid partners | Low | Medium | Auth.js v5 supports enterprise SSO via Microsoft OIDC as fallback. |
+| R4 | Credential-stuffing or leaked-password attack on email/password sign-in | Low | Medium | Argon2id hash slowness throttles per-attempt cost. The login endpoint enforces exponential backoff after 5 failed attempts, captured by IP, user, and email-fingerprint. The registration endpoint rejects credentials seen in published breach lists (using the HaveIBeenPwned k-anonymity API or, if Cordaid prefers offline checks, a curated Cordaid-held breach file). |
 | R5 | Three Vercel projects drift apart despite sharing the core package | Medium | High | Dependabot or Renovate opens a pull request in each application repository when a new `@cordaid/dashboard-core` version is published to the Cordaid-owned GitHub Packages registry. CI fails build on an application that pins below an agreed minimum version. FormConfig registry keys are typed and flow through `@cordaid/dashboard-core`, so CI also fails build if a key is misnamed or has an unresolved spec. Per-project env-var scope is verified at deploy time so that a leak in one project cannot affect the others. |
 | R6 | External viewer inadvertently gets record-level access | Low | High | Two-layer enforcement: SQL rows never returned for external queries; middleware blocks record-route URLs. |
-| R7 | MFA secret recovery workflow unclear | Medium | Medium | Documented out-of-band recovery via Cordaid ICT; recovery codes issued at first login. |
+| R7 | Password reset flow abused as a credential-stuffing or phishing vector | Medium | Medium | Reset uses HMAC-signed single-use email magic links (15-minute TTL). Reset endpoint enforces the same per-IP backoff, exponential throttling, and breach-list rejection as login. Administrative resets require Cordaid ICT written approval and emit a tamper-evident `audit_log` entry. |
 | R8 | HRIS integration slips warranty | Medium | Low | Manual provisioning + CSV import for MVP; HRIS as post-warranty enhancement. |
 | R9 | Indicator definitions unstable across the 15 days | Medium | High | Frozen manifest file as the contract; any change during build requires written MERL approval. |
 | R10 | Indicator SQL expressions pose injection risk | Low | High | Validation at insertion via SQL parser; deny-list on `pg_sleep`, network calls, and privileged extensions. |
@@ -510,7 +509,7 @@ The following items are pre-decided in this proposal and benefit from explicit C
 1. **Subdomain scheme.** Three subdomains (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`) or subpaths on a single domain. Default proposed: three subdomains.
 2. **HRIS integration timing.** Manual provisioning + CSV import for MVP, HRIS webhook as a post-warranty enhancement. Default proposed: MVP-first.
 3. **SSO providers.** Google + Microsoft by default. Any specific identity provider (Okta, ADFS, Cordaid internal IdP)?
-4. **MFA.** TOTP authenticator acceptable to all roles? Or do some roles need SMS / push?
+4. **Password policy confirmation.** Confirm at Day-1 inception that the §4.2 NIST-aligned password rules (14-character minimum, argon2id with per-user salt, rotated on compromise evidence only) match Cordaid ICT's password-policy guidance.
 5. **External partners.** List of partners per application at handover, including scope definitions, so we can seed `users.scope`.
 6. **Indicator definitions sign-off date.** Must precede Day 7 to freeze the indicator manifest.
 7. **Targets and workplan sign-off date.** Same logic.
