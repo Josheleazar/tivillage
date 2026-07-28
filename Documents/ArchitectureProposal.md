@@ -21,19 +21,21 @@ This proposal sets out the architecture, security model, performance budget, and
 2. **WeWork Dashboard**: partner-reach module.
 3. **AGRIP Dashboard**: activities-and-participants module.
 
-All three applications share the same code pattern, but each application runs as its own **Vercel project** under a single **Vercel Pro account**. The three Vercel projects (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`) each deploy their own Next.js 14 build, with their own env-var scope and their own release cadence. They share logic by importing one published `@cordaid/dashboard-core` package from a Cordaid-owned shared core repository (published to a private GitHub Packages registry inside the same Cordaid GitHub organisation), so behavioural changes flow through a single PR in the core repository and propagate to all three applications as Renovate-driven dependency-update PRs and regular Vercel deploys. Underpinning all three is one **Neon Postgres** database with schema-per-tenant isolation, a single **Auth.js v5** identity provider configured for the five Cordaid project roles defined in the brief, and refresh from **KoboToolbox** on a **GitHub Actions** schedule with a configurable 5–15 minute cadence. The frontend query path is database-only: KoboToolbox is never called from a user request. Aggregations are pre-materialised in the database, not recomputed on every filter change.
+The three Next.js 14 applications run as independent Vercel projects under a single Vercel Pro account, importing shared logic from a Cordaid-owned `@cordaid/dashboard-core` library published to a private GitHub Packages namespace. They share a Neon Postgres database (schema-per-tenant isolation), an Auth.js v5 identity provider for the five Cordaid roles, and a GitHub Actions schedule that fetches KoboToolbox data on a configurable 5–15 minute cadence. The frontend query path is database-only: KoboToolbox is never called from a user request, and aggregations are pre-materialised in Postgres.
 
 The brief's six expected benefits (timeliness, consistency, accountability, quality, inclusion-monitoring, and sustainability) are each mapped to a concrete deliverable below. This proposal also commits to the brief's D1–D6 acceptance schedule, the Cordaid-owned hosting and code-control requirements, the role-based access discipline, and the 30-calendar-day warranty with documented handover.
 
-We are not proposing to rebuild what already works. The architecture below is de-risked by a working production reference implementation developed for the same domain, with the same technology stack, and with the same multi-tenant pattern Cordaid's three applications require. The 15-day engagement is therefore devoted to adapting a proven foundation to Cordaid's MERL rules, branding, role matrix, and indicator definitions, not to re-engineering the dashboard from scratch.
+This proposal does not propose to rebuild what already works. The architecture below is de-risked by a working production reference implementation developed for the same domain, with the same technology stack, and with the same multi-tenant pattern Cordaid's three applications require. The 15-day engagement is therefore devoted to adapting a proven foundation to Cordaid's MERL rules, branding, role matrix, and indicator definitions, not to re-engineering the dashboard from scratch.
 
 ---
 
 ## 2. About the Consultant & Track Record
 
+This is a **single-consultant engagement**. All design, build, integration, documentation, training, and warranty work is delivered by Josh Eleazar; the engagement does not include sub-contractors, partner firms, or external team augmentation. Cordaid ICT engages one named point of contact throughout the 15-day build and the 30-day warranty.
+
 ### 2.1 Lead Engineer Profile: Josh Eleazar
 
-The technical delivery is led by **Josh Eleazar**, a bilingual (English/French) Tech Engineer specialising in high-reliability cloud infrastructure, robust backend systems, and data-intensive products. Josh's career is anchored in the gap between code that works and software that lasts. That architectural discipline is exactly what Cordaid's brief explicitly demands under §11 *Confidentiality, Data Protection and Intellectual Property* and §13 *Proposal Submission, Evaluation and Contracting*.
+The technical delivery is by **Josh Eleazar**, a bilingual (English/French) Tech Engineer specialising in high-reliability cloud infrastructure, robust backend systems, and data-intensive products. Josh's career is anchored in the gap between code that works and software that lasts. That architectural discipline is exactly what Cordaid's brief explicitly demands under §11 *Confidentiality, Data Protection and Intellectual Property* and §13 *Proposal Submission, Evaluation and Contracting*.
 
 Josh's working stack maps directly to the proposed deliverable:
 
@@ -70,17 +72,7 @@ The 15-day build is therefore not a "design then build" exercise. It is "configu
 
 ### 2.3 How the 15-day engagement is structured to honour Cordaid constraints
 
-The brief's §13 demands evidence of methodology realism, handover detail, and cost transparency. This proposal commits to the following method-over-technology points across the 15 working days:
-
-- **Day 1–3: Inception.** Lock users, role assignments, indicator baselines, workplan fields, refreshing cadence, ownership constraints, subdomains, and branding.
-- **Day 4–6: Data model and access matrix.** Translate MERL's approved indicator numerators and denominators to the schema-per-app Neon layout. Freeze the role matrix in §4 below.
-- **Day 7–9: Sync engine and RBAC.** Stand up GitHub Actions, hardened Kobo credentials, Neon roles, Auth.js v5 with the pg-adapter. Run an end-to-end load test against a synthetic Kobo backup.
-- **Day 10: Beta in staging.** Three applications behind a single auth and a single sync path, with every filter, chart, map, record view, and export functional.
-- **Day 11–13: UAT and test report.** KPI reconciliation against Cordaid's reference calculations, one smoke test per cell of the §4 RBAC matrix, a WCAG axe-core pass, and a performance smoke against §7 budgets.
-- **Day 14–15: Production cutover and handover.** DNS to production, credentials rotated to Cordaid-controlled accounts, training and documentation delivered, restoration drill complete.
-- **Day 16–45: 30-day warranty.** Weekly status; defects resolved or formally carried; closure report at Day 45.
-
-The reference platform compresses the Day 7–9 integration work. The testing rigour on Day 11–13 is new work, not skipped.
+The brief's §13 demands evidence of methodology realism, handover detail, and cost transparency. The 15 working days follow the schedule in §9.1: Days 1–3 Inception, Days 4–6 data model and access matrix, Days 7–9 sync engine and RBAC, Day 10 staging beta, Days 11–13 UAT and test report, Days 14–15 production cutover and handover, Days 16–45 warranty with Day-45 closure report. The reference platform compresses integration; UAT rigour on Days 11–13 is new work, not skipped.
 
 ---
 
@@ -92,7 +84,7 @@ KoboToolbox's KPI v2 `/data/` endpoint paginates at 1,000 rows per request. A 60
 
 **Contracted rule:** the browser only talks to the Next.js application; the Next.js application only talks to Neon Postgres; only the scheduled background path talks to KoboToolbox.
 
-**Performance reality.** The first-generation dashboard moved computation from the browser to a server-side API to escape the AGRIP browser crashes, and that move did reduce load times, though not as much as hoped. The reason it plateaued: every user request (filter change, refresh, drill-down) still crossed a slow boundary back to KoboToolbox to re-fetch raw submissions before the server could process them, and that roundtrip sat on the user-perceived latency path. The proposed Neon + GitHub Actions architecture is specifically designed to remove that on-request roundtrip. The sync engine fetches KoboToolbox data on a fixed cadence in the background, normalises and pre-computes aggregates into Postgres rows, and the user request then reads from a direct, indexed path against those pre-built rows. There is no KoboToolbox call on the user request path. The expected outcome on AGRIP-class data is a noticeable further reduction in load times. The exact millisecond or second counts depend on the size of the dataset, on the cardinality of the active filter combination, and on whether the filter hash hits a pre-computed aggregate or requires fresh materialisation. We commit to the architectural direction and the brief's 5-second ceiling, not to a specific latency promise. As datasets grow past AGRIP's current 61k, the additional levers in §7.3 (denormalised aggregate tables, partial aggregations by time window, filter-hash pre-warming, read replicas) come into play and are tuned against measured regressions during the warranty and beyond.
+**Performance reality.** The first-generation dashboard moved computation from the browser to a server-side API to escape the AGRIP browser crashes, and that move did reduce load times, though not as much as hoped. The reason it plateaued: every user request (filter change, refresh, drill-down) still crossed a slow boundary back to KoboToolbox to re-fetch raw submissions before the server could process them, and that roundtrip sat on the user-perceived latency path. The proposed Neon + GitHub Actions architecture is specifically designed to remove that on-request roundtrip. The sync engine fetches KoboToolbox data on a fixed cadence in the background, normalises and pre-computes aggregates into Postgres rows, and the user request then reads from a direct, indexed path against those pre-built rows. There is no KoboToolbox call on the user request path. The expected outcome on AGRIP-class data is a noticeable further reduction in load times. The exact millisecond or second counts depend on the size of the dataset, on the cardinality of the active filter combination, and on whether the filter hash hits a pre-computed aggregate or requires fresh materialisation. This proposal commits to the architectural direction and the brief's 5-second ceiling, not to a specific latency promise. As datasets grow past AGRIP's current 61k, the additional levers in §7.3 (denormalised aggregate tables, partial aggregations by time window, filter-hash pre-warming, read replicas) come into play and are tuned against measured regressions during the warranty and beyond.
 
 This separation gives Cordaid three independent upgrade paths and four independent failure domains: the user-facing app, the database, the identity provider, and the sync engine. A failure in any one is contained.
 
@@ -193,39 +185,19 @@ Neon hosts one database with four Postgres schemas: a `public` schema holding th
 
 Postgres roles enforce least privilege per the brief's *least privilege* clause. The Cordaid application's connection role can read and write only its own schema plus the shared `public` tables. The WeWork role sees only WeWork. The AGRIP role sees only AGRIP. A separate `app_cron` role (used only by the sync handler) writes to all raw and aggregate tables but cannot read user passwords. Migrations run from Cordaid-controlled CI/CD with a rotator-rotated credential.
 
-This pattern gives Cordaid one consolidated database with clean tenant boundaries, no per-tenant operational surface, and a single point of backup and recovery testing, directly addressing the brief's *Availability and recovery* requirement.
+This consolidated database addresses the brief's *Availability and recovery* requirement through clean tenant boundaries, no per-tenant operational surface, and a single backup and recovery point.
 
 ### 3.5 Multi-tenant code pattern (the four-repository model)
 
-The reference implementation's `FormConfig` registry pattern is preserved end-to-end, but deployed across a **two-tier architecture**: **one Cordaid-owned published library package, plus three Cordaid-owned Next.js 14 applications that consume it.** The three applications do not share a Next.js runtime. They share a library. Each application is independently built, deployed, and operated. None is "the main app" with two shims beside it.
+The reference implementation's `FormConfig` registry pattern is preserved end-to-end across a **two-tier architecture**: **one Cordaid-owned published library package, plus three Cordaid-owned Next.js 14 applications that consume it.**
 
-1. **`cordaid-dashboard-core` (Cordaid-owned) is a published library package, not a Next.js app.** It compiles to the `@cordaid/dashboard-core` npm artifact via `npm publish` into a private GitHub Packages registry inside the Cordaid GitHub organisation. It never produces a `next build` of its own and deliberately has **no** `next.config`, **no** `app/` directory, **no** page routes, **no** API routes. Its contents are:
-   - The `FormConfig` registry catalogue: typed objects describing every visible dashboard surface (date column, search fields, filter widgets, KPI tiles, chart specs, table columns, drill-down cascades, badge/chip styling, detail-drawer header content).
-   - Shared React primitives: chart wrappers around ECharts, map wrappers around Leaflet, tables, KPI tiles, filter widgets, drill-down cascade components, layout shells, RBAC-aware UI guards.
-   - Auth.js v5 helpers: server-side session validator, RBAC enforcement on UI rendering, the email-and-password login form, the OAuth callback handler, the logout server action.
-   - Sync-engine primitives: KoboToolbox pagination, normalisation, schema-walker, indicator validation, small-cell suppression, idempotent rebuild.
-   - Compliance helpers: `audit_log` and `refresh_log` row shapes, structured-log emission helpers.
+1. **`cordaid-dashboard-core` (Cordaid-owned library).** Publishes as `@cordaid/dashboard-core` to a private GitHub Packages registry inside the Cordaid GitHub organisation. It is intentionally not a Next.js app: **no** `next.config`, **no** `app/` directory, **no** page routes, **no** API routes. Its contents are the `FormConfig` registry catalogue, shared React primitives (chart wrappers around ECharts, map wrappers around Leaflet, tables, KPI tiles, RBAC-aware UI guards), Auth.js v5 helpers (session validator, RBAC enforcement, login form, OAuth callback, logout action), sync-engine primitives (Kobo pagination, schema-walker, indicator validator, small-cell suppression), and compliance helpers (`audit_log` / `refresh_log` row shapes).
 
-2. **`cordaid-feedback-dashboard`, **`wework-partnerreach-dashboard`, **`agrip-activities-dashboard` (Cordaid-owned application repositories) are each a full Next.js 14 application.** The `-dashboard` suffix on each repository name distinguishes those Next.js *applications* (software) from the Cordaid-owned *KoboToolbox assets* they consume (the `'Cordaid feedback asset'`, `'WeWork partner-reach asset'`, and `'AGRIP activities-and-participants asset'` referenced in §3.2 and §5). Each application contains zero or more asset bindings via its FormConfig; each asset belongs to exactly one application under §3.4's schema-per-tenant isolation. Each contains:
-   - A complete Next.js 14 App Router structure (`app/` directory with page routes, layouts, error pages, middleware).
-   - Its own `next.config.mjs` and `package.json`, with `@cordaid/dashboard-core` pinned to an agreed minimum version.
-   - Its own FormConfig object: declaring one or more KoboToolbox asset bindings (asset UIDs, schema-version per asset, and an adapter per asset) plus the role bindings and per-app metadata for this application.
-   - Its own API routes: most importantly the per-tenant sync-webhook endpoint invoked by the GitHub Actions scheduled workflow in §5.1.
-   - Its own Vercel wiring: production-domain alias, env-var scope, Vercel project settings.
+2. **`cordaid-feedback-dashboard`, `wework-partnerreach-dashboard`, `agrip-activities-dashboard` (Cordaid-owned application repositories) are each a full Next.js 14 application.** The `-dashboard` suffix distinguishes those Next.js *applications* (software) from the Cordaid-owned *KoboToolbox assets* they consume (`'Cordaid feedback asset'`, `'WeWork partner-reach asset'`, `'AGRIP activities-and-participants asset'` referenced in §3.2 and §5). Each application contains its own App Router structure, `next.config.mjs`, `package.json` pinning `@cordaid/dashboard-core` to an agreed minimum, FormConfig object declaring one or more KoboToolbox asset bindings, API routes (including the per-tenant sync-webhook endpoint invoked by §5.1), and Vercel wiring. Each application contains no bespoke dashboard code beyond its FormConfig selection; UI, RBAC, auth, sync engine, and audit logging all come from `@cordaid/dashboard-core`.
 
-   Each application carries **no** bespoke dashboard code beyond the per-app FormConfig selection. UI rendering, charting logic, RBAC checks, authentication flows, sync-engine orchestration, and audit logging all come from `@cordaid/dashboard-core`. The application's only job is to (a) import the core, (b) supply its own FormConfig, and (c) be a Next.js host that Vercel can build and serve.
+**Three apps, not one.** Cordaid ICT retains three independently deployable Vercel projects (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`) with separate env-var scopes, separate GitHub repositories, separate production domains, and separate release cadences. They share library semantics, not a Next.js runtime. A disclosure-rule change to the Cordaid Feedback dashboard cannot accidentally surface WeWork partner-reach data even though both apps import the same library; the library enforces typing discipline and each application enforces scope discipline on top.
 
-**Three apps, not one.** Cordaid ICT retains three independently deployable Vercel projects with separate env-var scopes, separate GitHub repositories, separate production domains (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`), and separate release cadences. They share the same library semantics but are not the same Next.js runtime. A disclosure-rule change to the Cordaid Feedback dashboard cannot accidentally surface WeWork partner-reach data, and vice versa, even though both apps import the same `@cordaid/dashboard-core` package. The library enforces typing discipline; each application enforces scope discipline on top.
-
-Each application repository connects 1:1 to one of the three Vercel projects under the single Vercel Pro account (per §3.3). The core repository is not connected to Vercel at all; it only builds and publishes.
-
-Because the application repositories are independent, version drift is governed by automated discipline:
-
-- **Dependabot or Renovate** is configured on each application repository to auto-open a pull request when a new `@cordaid/dashboard-core` version is published to the GitHub Packages registry. Pull-request review and merge happen inside the application repository under Cordaid ICT's controls.
-- **CI gate v1 (stale-pin enforcement)** runs at PR time and at deploy time on each application. It enforces an agreed minimum version (the current `latest` tag minus at most one minor version) and fails the build if the application pins below that floor. This protects against unattended drift if a Renovate pull request is delayed or skipped.
-- **CI gate v2 (TypeScript shape enforcement)** runs TypeScript over the consumed `@cordaid/dashboard-core` types in each application. If a `FormConfig` registry key is misnamed or refers to a column the projected record schema does not provide, the build fails before deploy. MERL catches shape errors at review time, not at runtime.
-
-The shared registry is consumed at three independent points inside each application: by the React renderer, by that application's own server-side API (running the sync-engine primitives imported from `@cordaid/dashboard-core`), and by the indicator-validation step at sync time. Behavioural changes propagate as a new `@cordaid/dashboard-core` package version, then as a Renovate pull request per application repository, then as a regular Vercel deploy. Handover transfers Cordaid ICT as owners of all four repositories and the GitHub Packages namespace; the consultant's access is removed at handover (per brief §11).
+Each application repository connects 1:1 to one Vercel project (per §3.3); the core repository is not connected to Vercel and only builds and publishes. Drift discipline: Renovate opens a pull request in each application repository when a new `@cordaid/dashboard-core` version is published; a CI gate fails the build on stale pins below an agreed minimum; a second CI gate runs TypeScript over the consumed core types so a misnamed `FormConfig` registry key fails the build before deploy. Handover transfers Cordaid ICT as owners of all four repositories and the GitHub Packages namespace.
 
 ---
 
@@ -233,13 +205,7 @@ The shared registry is consumed at three independent points inside each applicat
 
 ### 4.1 The five Cordaid project roles
 
-The brief's §4 *Intended Users and Decision Needs* defines five role families. This proposal encodes them directly as a Postgres enum (`senior_management`, `project_manager`, `merl_data_management`, `system_admin_ict`, `external_partner_viewer`) and enforces them at three independent layers:
-
-1. **Auth.js session claim.** Loaded into the JWT at login; re-validated against `users.role` on every API call.
-2. **Server middleware.** Wraps every `/api/*` route; rejects with HTTP 403 when the role or scope does not match.
-3. **SQL row-level predicates.** The `submissions_clean` SELECT statements enforce role and scope at the SQL layer as well, so client-only enforcement is not a security boundary.
-
-External viewers carry an additional `scope` JSONB column with their assigned geography, portfolio, or partner attribution, used by the per-request scope guard. Out-of-scope rows return 403.
+The brief's §4 *Intended Users and Decision Needs* defines five role families. This proposal encodes them directly as a Postgres enum (`senior_management`, `project_manager`, `merl_data_management`, `system_admin_ict`, `external_partner_viewer`) and enforces them at three independent layers: the Auth.js session claim (loaded at login, re-validated against `users.role` on every API call); the server middleware (wraps every `/api/*` route and returns HTTP 403 when the role or scope does not match); and SQL row-level predicates on `submissions_clean` so client-only enforcement is not a security boundary. External viewers carry an additional `scope` JSONB column with their assigned geography, portfolio, or partner attribution, used by the per-request scope guard; out-of-scope rows return 403.
 
 ### 4.2 Identity lifecycle and password authentication
 
@@ -277,7 +243,7 @@ Three enforcement rules attached to this matrix are non-negotiable:
 
 ### 4.4 Drill-downs and the map
 
-The AGRIP drill-down filter pattern (District → Sub-county → Parish → Village) is preserved exactly. Drill-down options are pre-computed in Neon at sync time, not recomputed per request. External viewers do not get drill-down; they see only top-level district aggregates, and the middleware enforces this. The Leaflet map (district bubble markers sized by record count) is restricted to Project Manager (geographic-scope only) and MERL. Senior Management sees aggregate district-level totalled counts via the donut and horizontal-bar charts, not the map.
+The AGRIP drill-down pattern (District → Sub-county → Parish → Village) is preserved exactly; options are pre-computed in Neon at sync time, not per request. External viewers see only top-level district aggregates (middleware-enforced). The Leaflet map (district bubble markers) is restricted to Project Manager (geographic-scope only) and MERL; Senior Management sees district-level aggregates via the donut and horizontal-bar charts.
 
 ---
 
@@ -285,15 +251,15 @@ The AGRIP drill-down filter pattern (District → Sub-county → Parish → Vill
 
 ### 5.1 GitHub Actions scheduled workflow
 
-Sync is triggered by a **GitHub Actions scheduled workflow** (`.github/workflows/sync.yml`). To meet the brief's 5–15 minute freshness SLA (brief §4, *Refresh*), the workflow runs at a strict 10-minute cadence (`*/10 * * * *`). To avoid duplicating pipeline compute and to keep billable minutes predictable, a single workflow uses a fan-out step to trigger all three Cordaid applications concurrently in parallel. Each tenant's Next.js API endpoint validates a tenant-specific webhook secret stored in GitHub Repo Secrets. The runner only sends a trigger signal and never executes Kobo logic itself; the heavy lifting happens inside Neon and the Next.js runtime on Cordaid-controlled infrastructure.
+Sync is triggered by a **GitHub Actions scheduled workflow** (`.github/workflows/sync.yml`) at a strict 10-minute cadence (`*/10 * * * *`) to meet the brief's 5–15 minute freshness SLA. A single workflow fans out to all three Cordaid applications in parallel; each tenant's Next.js API endpoint validates a tenant-specific GitHub Repo Secret. The runner only signals; the heavy lifting happens inside Neon and the Next.js runtime on Cordaid-controlled infrastructure.
 
-**Cost transparency of the schedule.** GitHub Actions on a private repository includes 2,000 free runner minutes per month. A 10-minute cadence is 144 invocations per day, or 4,320 invocations per month. Each invocation is capped to under 60 seconds by the workflow design (it only POSTs a trigger; it does not walk Kobo data). Under GitHub's per-job billing round-up, that is 4,320 billable minutes per month. The 2,320-minute overage above the free allowance costs approximately $19 per month, charged transparently by GitHub. This is documented in §10 and renegotiated with Cordaid at inception if the cadence is later shortened below 10 minutes.
+**Cost transparency.** Private repo free tier is 2,000 runner minutes per month. A 10-minute cadence is 4,320 invocations × per-invocation billing each capped under 60 seconds, so the 2,320-minute overage is approximately $19 per month, charged transparently by GitHub. Renegotiated at inception if the cadence is later shortened.
 
-Compared to Vercel Cron, GitHub Actions gives a longer per-job execution budget (multi-minute hosted runs versus Vercel's per-invocation second budget), richer matrix and fan-out primitives, and a fully auditable workflow-as-code artefact in the same repository as the deliverable. Compared to Neon HTTP-cron, GitHub Actions does not require a separate auth surface inside the database tier.
+Compared with Vercel Cron, GitHub Actions gives a longer per-job budget, richer matrix and fan-out primitives, and an auditable workflow-as-code artefact in the same repository. Compared with Neon HTTP-cron, it avoids a separate auth surface inside the database tier.
 
 ### 5.2 What the sync engine does (one paragraph, deliberately not a flow chart)
 
-The sync engine authenticates with each tenant's Kobo API credentials, paginates the asset's `/data/` endpoint to the reported `totalCount` with retry-with-backoff on transient failure, applies the schema-walker hardening used in the reference implementation (defending against the four documented Kobo shape-drift modes), normalises and de-duplicates each submission, upserts it into the tenant's `submissions` table on `_uuid`, recomputes the clean version of the row, rebuilds the pre-computed KPI rows for the active filter-hash set, rebuilds every chart option the tenant's FormConfig declares, rebuilds the per-district geo-aggregation set, rebuilds the filter options for every select and drill widget, applies the small-cell suppression pass (see §8.2), and writes a structured row to `refresh_log` with status, duration, source count, clean count, and any error. The whole path is idempotent. If the schema hash matches the last good sync, the engine short-circuits to a fast no-op without further work; the exact duration depends on schema-walker complexity and is observed, not asserted.
+The idempotent sync engine authenticates with each tenant's Kobo credentials, paginates `/data/` to `totalCount` with retry-with-backoff, applies the schema-walker hardening against the four documented Kobo shape-drift modes, normalises and de-duplicates each submission, upserts on `_uuid` into the per-tenant `submissions` table, rebuilds per-tenant KPI rows, chart options, district geo-aggregations, and filter options, applies the §8.2 small-cell suppression pass, and writes a structured `refresh_log` row with status, duration, source count, clean count, and any error. If the schema hash matches the last good sync, the engine short-circuits to a fast no-op; exact duration depends on schema-walker complexity and is observed, not asserted.
 
 ### 5.3 Manual refresh, rate limiting, and out-of-band triggers
 
@@ -329,7 +295,7 @@ The reference implementation's server-side aggregation engine generates, per req
 | Drill-down cascade options | Same `agg_filters` table, keyed by drill-level. |
 | Date bounds | `app_config` row keyed `date_bounds`. |
 
-A request for a known filter combination is one indexed SELECT against a pre-computed aggregate row. A novel filter combination is computed once during a sync pass, stored under its filter hash, and served by indexed SELECT from then on. The first computation can take seconds on AGRIP-class data; subsequent requests hit the cache. We commit to architecture and indexing discipline rather than to a specific cold-aggregation latency.
+A request for a known filter combination is one indexed SELECT against a pre-computed aggregate row. A novel filter combination is computed once during a sync pass, stored under its filter hash, and served by indexed SELECT from then on. The first computation can take seconds on AGRIP-class data; subsequent requests hit the cache. This proposal commits to architecture and indexing discipline rather than to a specific cold-aggregation latency.
 
 ### 6.2 Indicator definitions
 
@@ -343,7 +309,7 @@ Indicators are SQL expressions owned by MERL, stored in a per-tenant `indicators
 
 ## 7. Performance Approach
 
-The brief's §4 *Technical and Non-Functional Requirements* is precise about the floor: *"Under the agreed device, connection and data-volume baseline, common pages should normally load within about five seconds and cached filters should respond promptly."* This proposal does not commit to millisecond figures below that floor. The first-generation dashboard experience is informative: moving work from browser to server did reduce load times, but the gain was bounded because every user request still re-crossed the slow boundary back to KoboToolbox to fetch raw submissions before the server could process them. The proposed architecture is designed to remove that on-request KoboToolbox roundtrip. The sync engine fetches KoboToolbox data on a fixed cadence in the background and stores ready-to-serve aggregates in Neon. The user request then reads directly from those pre-built rows. We do commit to the brief's 5-second ceiling as the only compliance number, and we agree with Cordaid on the device, connection, and data-volume baseline at Day-1 inception (see §7.4). All other timings are design intent rather than commitment. Load times are measured at Day-13 UAT against the agreed baseline and revisited during the 30-day warranty and the Phase-2 performance programme.
+The brief's §4 floor is *"common pages should normally load within about five seconds and cached filters should respond promptly"*. This proposal commits to the 5-second ceiling as the only compliance number, with §3.1 explaining the architectural direction (no on-request KoboToolbox roundtrip; aggregates pre-built in Neon). No commitment is made to millisecond figures below the ceiling. Load times are measured at Day-13 UAT against the device, connection, and data-volume baseline agreed at Day-1 inception (see §7.4), and revisited during the 30-day warranty and the Phase-2 performance programme.
 
 ### 7.1 What the architecture optimises for
 
@@ -355,30 +321,15 @@ The brief's §4 *Technical and Non-Functional Requirements* is precise about the
 | Schema-walker idempotency on sync | A no-op short-circuits the rebuild when nothing has changed; repeated ticks do not compound work. |
 | ECharts and Leaflet dynamic-imported with per-tenant bundle split | The SSR bundle stays small; the map only ships when the map view is rendered. |
 
-Each lever has a cost. Pre-materialised aggregates grow storage proportional to the number of distinct `filter_hash` values served, and they introduce a staleness window between sync and query. Edge-cache hits reduce egress at the cost of up-to-60-second staleness on cached payloads (consistent with the brief's 5–15 minute refresh cadence, the brief's *visible timestamp* requirement, and the *stale-data warning* requirement in §4.4 of the brief). These trade-offs are deliberate.
+Each lever has a deliberate cost: pre-materialised aggregates grow storage per distinct `filter_hash` and introduce a sync-to-query staleness window; edge-cache hits reduce egress at the cost of up-to-60-second staleness (consistent with the brief's 5–15 minute cadence and the *visible timestamp* / *stale-data warning* requirements).
 
 ### 7.2 Per-application profile
 
-The three Cordaid applications differ substantially on size, and the architecture is sized to handle each honestly rather than optimistically:
+Cordaid Feedback (sub-1k expected) and WeWork (small/medium) will easily clear the brief's 5-second ceiling. AGRIP (currently 61k+ and growing) relies on pre-materialisation, the circle-marker map, and the SQL row-level scope guard and requires iterative performance engineering as data scales.
 
-- **Cordaid Feedback Dashboard**: small (sub-1k submissions expected). All current patterns handle it comfortably; the architecture is overkill but inexpensive, and the brief's 5-second ceiling will not be a constraint.
-- **WeWork Dashboard**: small to medium. Same as above.
-- **AGRIP Dashboard**: medium to large (currently 61k submissions and growing). The patterns that matter here are pre-materialisation, the circle-marker map, and the SQL row-level scope guard. Continuous performance measurement is part of MERL's regular use of the dashboard and feeds back into the sync engine as a tuning input.
+### 7.3 Scaling readiness
 
-The brief's 5-second ceiling applies to common pages across all three. We expect Cordaid Feedback and WeWork to stay well within that bound by default, and AGRIP to require ongoing performance engineering as the dataset grows.
-
-### 7.3 Scaling readiness (datasets grow; performance engineering is iterative)
-
-Several engineering moves apply when needed. They are not in scope for the 15-day build, but the architecture leaves room for them, and any of them can be added without compromising the RBAC, audit, or security guarantees:
-
-- **Denormalised aggregate tables** at district, subcounty, and indicator level; pre-computed at sync time.
-- **Partial aggregations** that segment by time window (last 7 days, last 30 days, last 90 days) so district drill-down and trend charts serve from small slices.
-- **Read replicas** in Neon for heavy-filter, read-heavy workload.
-- **Materialised views** that fall back to on-demand recomputation only when the partial aggregate is unavailable.
-- **Pagination and streaming** on the record register so a single user's interaction with large datasets does not block everyone else.
-- **Filter-hash pre-warming** of MERL-pinned combinations on every sync so the top-N filters never go cold.
-
-Documented here so Cordaid ICT and MERL can plan a Phase-2 performance programme without an architecture change.
+Not in scope for the 15-day build, but the architecture supports denormalised aggregate tables, time-window partial aggregations, read replicas, materialised views, register pagination, and filter-hash pre-warming. These can be added without changing the RBAC, audit, or security guarantees, and they form the basis of a Phase-2 performance programme.
 
 ### 7.4 Acceptance criteria
 
@@ -415,7 +366,7 @@ No aggregate cell with fewer than `MIN_CELL_COUNT` (configurable per tenant and 
 
 ### 8.3 Out of scope (with explanation)
 
-- **Cordaid-internal DNS, email service, and HRIS.** Out of scope. We expose a `POST /api/users/sync-from-hr` webhook that Cordaid ICT can wire to a nightly HRIS event; the integrator is Cordaid's responsibility.
+- **Cordaid-internal DNS, email service, and HRIS.** Out of scope. A `POST /api/users/sync-from-hr` webhook is exposed for Cordaid ICT to wire to a nightly HRIS event; the integrator is Cordaid's responsibility.
 - **Network-level isolation VPC peering.** Neon supports PrivateLink and AWS Private Networking. Recommended at handover once traffic justifies the cost; not required for the initial 15-day cutover.
 - **Cross-tenant exports outside the brief's RBAC.** Out of scope. MERL can read across the four schemas via the `app_reader` role for analytical queries, but anonymised bulk exports require written approval.
 
@@ -440,7 +391,7 @@ Each acceptance is testable. There is no "approved" without evidence.
 
 Per the brief §12 *Warranty and Change Control*: the warranty covers non-conformity with approved requirements under agreed operating conditions. Defects are recorded by severity, impact, cause, action, and release; changes are tested in staging before approval. New indicators, integrations, source changes, or features are enhancements, not warranty items, and require documented impact assessment and written approval. Post-warranty support is priced separately at the applicant's option.
 
-We propose a weekly status report during the warranty period to keep Cordaid informed without requiring meetings.
+A weekly status report is proposed during the warranty period to keep Cordaid informed without requiring meetings.
 
 ---
 
@@ -448,7 +399,7 @@ We propose a weekly status report during the warranty period to keep Cordaid inf
 
 Cost transparency is a brief §13 evaluation criterion. All figures are **indicative as of the proposal date** and would be re-quoted with current vendor pricing at contract signature. Hosting, domains, and licences are absorbed by Cordaid-controlled accounts per the brief §11 *Confidentiality, Data Protection and Intellectual Property* requirement that Cordaid owns the operational footprint. **No domains, hosting licences, or infrastructure services are purchased, owned, or resold by the consultant.**
 
-| Item | Quantity | Indicative monthly (USD) | Notes |
+| Service | Quantity | Subscription fee (USD/month, indicative) | Notes |
 |---|---|---|---|
 | **Neon Postgres (Launch plan)** | 1 database | ~$19 | Consolidates all four schemas. Included autoscaling compute and storage comfortably exceed the requirement for ~80 k rows, pre-computed aggregates, and the audit/refresh log tables. 7-day point-in-time recovery included; preview and staging via branching. |
 | **Vercel Pro account (three projects)** | 3 Vercel projects | ~$20 (per seat) + included usage | One Vercel Pro account hosts three projects (one per Cordaid application). Each project has its own production domain (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`), its own deployment pipeline, and its own env-var scope. All three import the same published `@cordaid/dashboard-core` package from a Cordaid-owned shared core repository that publishes to a private GitHub Packages namespace, so the projects stay in lock-step at the code-pattern level without sharing a runtime. On the brief's expected traffic, the Pro plan's shared bandwidth and function-execution budgets comfortably cover all three. |
@@ -457,6 +408,11 @@ Cost transparency is a brief §13 evaluation criterion. All figures are **indica
 | **Object storage (CSV export payloads)** | ~10 GB/mo | ~$3 | R2-compatible bucket held in Cordaid-controlled account, 30-day TTL. |
 | **Backup target (R2-compatible)** | ~20 GB/week | ~$5 | Holds weekly Postgres logical backups for 30 days, cross-region optional. |
 | **Auth.js v5 identity provider** | self-hosted | $0 | Open-source, embedded in the Next.js runtime. |
+| **Google OAuth (Auth.js v5 identity provider)** | 1 OAuth app per application | $0 | Free Google Cloud Console OAuth-app registration; Auth.js v5 handles the token exchange. No subscription. |
+| **Microsoft Entra ID (Auth.js v5 identity provider)** | 1 Entra ID app per application | $0 | Free Microsoft Entra ID app registration; Auth.js v5 handles the token exchange. No subscription. |
+| **HIBP k-anonymity API (or Cordaid-held offline breach file)** | 1 (optional) | $0 | Default per §11 R4 is a Cordaid-held offline breach file. The HIBP public k-anonymity API is a free opt-in alternative. |
+| **Open-source security tooling (CI release gate)** | per release | $0 | OWASP ZAP baseline scan, Semgrep static analysis, gitleaks secrets scan, axe-core WCAG gate. All free OSS, run inside CI. |
+| **KoboToolbox data source** | 3 assets (Cordaid-owned, one per application) | $0 | Cordaid owns the assets; data is fetched via authenticated API tokens at no per-call subscription cost. |
 | **Domain and DNS** | root + three subdomains | $0 (see note) | Cordaid already owns the root domain and will point DNS at the Vercel deployment. Subdomains are free of registry charge. For reference: a normally priced new `.org` registration currently runs **$10–$20 per year** at typical registrars, with renewals in the same range. This proposal does not include any domain purchase. |
 
 **Total indicative recurring operational cost: ~$66 per month** for the fully integrated three-application footprint, plus any existing Cordaid domain renewal (outside this proposal).
@@ -465,68 +421,77 @@ One-time costs (design, build, handover, training, 30-day warranty) are priced s
 
 **Third-party processors considered in this proposal:** Vercel (hosting and edge cache), Neon Postgres (database), Auth.js pg-adapter (open-source, no separate processor), R2-compatible object-storage provider, Google OAuth, Microsoft OAuth, GitHub Actions (CI/CD and scheduled triggers). No closed-source library processes Cordaid project data on behalf of the consultant. All third-party services, processors, and recurring costs are listed above for the brief's §13 *disclose every third-party service before approval* requirement.
 
+### 10.1 Budget and payment schedule
+
+The total contract value for the design, build, handover, training, and 30-day warranty phase is **5,190,000 UGX (Ugandan Shilling), excluding VAT**. This figure covers one-time engineering services only and is independent of the recurring operational cost above (which Cordaid pays directly to the listed third-party providers on Cordaid-controlled accounts).
+
+The schedule is structured as four discrete milestones, each tied to a specific acceptance gate in §9.1. The first three milestones fall inside the 15-day build window per §2.3; the fourth and final payment is triggered at the close of Day 30 (the 15-day mark of the 30-day warranty period).
+
+| # | Day | Description and tied acceptance gate | Amount (UGX) | Cumulative to date (UGX) |
+|---|---|---|---|---|
+| M1 | Day 0 | Contract signature + Inception deposit. Acceptance: contract countersigned and Day-1 inception kickoff confirmed. | 1,237,500 | 1,237,500 |
+| M2 | Day 10 | D3 *Integrated beta platform in staging* per §9.1. Three applications behind a single auth and a single sync path; all filters, charts, maps, record views, and exports functional; staging accessible to MERL. | 1,287,500 | 2,525,000 |
+| M3 | Day 15 | D5 *Production deployment, training, complete handover* per §9.1. Three production subdomains live; credentials rotated to Cordaid-controlled accounts; training recorded; documentation delivered; restoration drill complete. | 1,327,500 | 3,852,500 |
+| M4 | Day 30 | D6 interim *Warranty first-half release*. All critical and high defects resolved or formally carried; operations transfer confirmed; renewal cadence and Day-45 closure-paperwork obligations agreed. | 1,337,500 | 5,190,000 |
+| **Total** | | | **5,190,000** | |
+
+**Currency and VAT.** All milestone amounts are denominated in UGX and stated exclusive of VAT. Where Uganda tax law requires VAT to be charged on a particular milestone invoice, it is invoiced separately at the prevailing rate and settled by Cordaid within the same payment terms. The 5,190,000 UGX total is the engineering contract value and does not include VAT.
+
+**Payment terms.**
+
+- *Invoice.* The consultant raises each milestone invoice within three working days of Cordaid ICT acceptance of the tied gate in §9.1.
+- *Due date.* Net 7 from invoice date.
+- *Settlement method.* Bank transfer to a Cordaid-controlled nominated account specified by the consultant at contract signature and held in confidence per the brief §11 (no public disclosure of payment routing is made in this proposal).
+- *Late payment.* A 7-day grace window is granted after the due date. Beyond the grace window, a simple 1.5% per-month accrual applies to the overdue amount. If a milestone is unpaid more than 21 days past the due date, work on the next milestone pauses until cleared. The 30-day warranty clock continues to run on Cordaid's side during any pause, so the warranty period is not extended by the consultant's pause.
+- *Currency.* UGX only.
+
+This schedule is consistent with §2.3 (*How the 15-day engagement is structured to honour Cordaid constraints*) and §9.1 (*The six deliverables explicitly required by the brief*).
+
 ---
 
 ## 11. Risks & Mitigations
 
-| # | Risk | Likelihood | Impact | Specific mitigation |
+| # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | Kobo schema drift in production breaks sync silently | Medium | High | Schema hash stored per tenant; on drift, previous aggregates retained read-only, dashboard shows version-mismatch banner, MERL approves before re-applying schema; new submissions skip drift-affected labels until re-approval. |
-| R2 | Neon → Vercel egress costs exceed budget at scale | Low | Medium | Edge-cache `?aggregated=true&hash=…` for 60 s; aggregation clustering by filter_hash reduces duplicate egress. |
-| R3 | GitHub Actions double-tick overlap | Low | Medium | Postgres advisory lock at sync start; if locked, return immediately. |
-| R4 | Credential-stuffing or leaked-password attack on email/password sign-in | Low | Medium | Argon2id hash slowness throttles per-attempt cost. The login endpoint enforces exponential backoff after 5 failed attempts, captured by IP, user, and email-fingerprint. The registration endpoint rejects credentials seen in published breach lists (using the HaveIBeenPwned k-anonymity API or, if Cordaid prefers offline checks, a curated Cordaid-held breach file). |
-| R5 | Three Vercel projects drift apart despite sharing the core package | Medium | High | Dependabot or Renovate opens a pull request in each application repository when a new `@cordaid/dashboard-core` version is published to the Cordaid-owned GitHub Packages registry. CI fails build on an application that pins below an agreed minimum version. FormConfig registry keys are typed and flow through `@cordaid/dashboard-core`, so CI also fails build if a key is misnamed or has an unresolved spec. Per-project env-var scope is verified at deploy time so that a leak in one project cannot affect the others. |
-| R6 | External viewer inadvertently gets record-level access | Low | High | Two-layer enforcement: SQL rows never returned for external queries; middleware blocks record-route URLs. |
-| R7 | Password reset flow abused as a credential-stuffing or phishing vector | Medium | Medium | Reset uses HMAC-signed single-use email magic links (15-minute TTL). Reset endpoint enforces the same per-IP backoff, exponential throttling, and breach-list rejection as login. Administrative resets require Cordaid ICT written approval and emit a tamper-evident `audit_log` entry. |
-| R8 | HRIS integration slips warranty | Medium | Low | Manual provisioning + CSV import for MVP; HRIS as post-warranty enhancement. |
-| R9 | Indicator definitions unstable across the 15 days | Medium | High | Frozen manifest file as the contract; any change during build requires written MERL approval. |
-| R10 | Indicator SQL expressions pose injection risk | Low | High | Validation at insertion via SQL parser; deny-list on `pg_sleep`, network calls, and privileged extensions. |
-| R11 | GitHub Actions overage budget over-runs | Low | Medium | Cadence tightening rule documented in §5.4; transparent re-quote with Cordaid ICT if cadence is shortened below 10 minutes. |
-
----
-
-## 12. Track Record: Reference Implementation Capabilities
-
-This section restates the production reference capabilities cited in §2.2 with their architectural implications for the Cordaid engagement. It is the technical evidence behind the credibility claim.
-
-| Reference capability | What it proves for Cordaid |
-|---|---|
-| **Server-side aggregation engine** | A working pipeline already converts 60,000+ raw KoboToolbox records into a ~50 KB decision-ready payload per request, with KPIs, chart options, filter option sets, drill-down cascades, and district map bubbles all pre-computed server-side. The architectural pattern transfers directly to Cordaid; specific millisecond timings are re-measured at Cordaid's data volumes rather than asserted. |
-| **Declarative multi-form registry** | Onboarding a new Cordaid monitoring project (Cordaid Feedback, WeWork, AGRIP) is a typed configuration review, not a UI rebuild. This directly addresses the brief's *Scalable internal capability* expected result and protects MERL from per-project rework. |
-| **KoboToolbox schema walker** | The reference defends against four documented KPI v2 shape-drift modes (string-label, array-label, language-dict, per-language top-level-key); handles KPI v2 pagination limits, repeat-data, edit-detection, and version-mismatch without silently mis-labelling records. The Cordaid engagement inherits this hardening on Day 7 (sync engine build). |
-| **Performance-tuned visualisation layer** | ECharts is dynamically imported so the SSR bundle stays small. Leaflet circle markers replace per-GPS point markers so the map renders district aggregates without per-record geometry. The architecture gives Cordaid the same reliability characteristics at AGRIP scale; render latency on Cordaid data is re-measured at Day-13 UAT. |
-| **Declarative KPI / chart / filter / table config** | Every visible dashboard surface (KPI tile, chart, filter widget, table column, drill-down level, badge styling, drawer header content) is described by a typed config object, not hard-coded. MERL updates become one PR. |
-| **CSV export and pagination endpoints** | Existing record-register CSV export and table pagination already meet the brief's *Reports and controlled export* shape; the engagement is a matter of layering the auth and audit, not building from zero. |
-| **WCAG-aware UI patterns** | Visible focus rings, labelled controls, sufficient contrast, status cues not solely colour-dependent; all reinforced by the proposal's CI axe-core gate and required by the brief's Accessibility clause. |
-| **Lean engineering methodology** | Means the 15-day schedule compresses boilerplate, dependency research, and test scaffolding without trading depth for speed. Output is enterprise-grade modular logic and complete documentation. |
+| R1 | Kobo schema drift in production breaks sync silently | Medium | High | Retain old aggregates read-only on drift; require MERL manual approval before re-applying schema. |
+| R2 | Neon → Vercel egress costs exceed budget at scale | Low | Medium | Edge-cache for 60 s and cluster aggregations by filter_hash to avoid duplicate egress. |
+| R3 | GitHub Actions double-tick overlap | Low | Medium | Postgres advisory lock short-circuits the secondary concurrent tick. |
+| R4 | Credential-stuffing or leaked-password attack on email/password sign-in | Low | Medium | Argon2id hash throttling, exponential IP backoff after 5 failed attempts, and HIBP k-anonymity registration check (or a Cordaid-held offline breach file if Cordaid prefers no external call). |
+| R5 | Three Vercel projects drift apart despite the shared core package | Medium | High | Renovate auto-opens PRs on new `@cordaid/dashboard-core` releases; CI fails build on stale pins and on TypeScript registry-key mismatch. |
+| R6 | External viewer inadvertently gets record-level access | Low | High | SQL row-level filtering plus middleware-enforced block on external record-route URLs. |
+| R7 | Password reset flow abused as a credential-stuffing or phishing vector | Medium | Medium | HMAC single-use 15-minute reset links; same per-IP backoff; tamper-evident admin-reset audit entry. |
+| R8 | HRIS integration slips warranty | Medium | Low | Defer HRIS webhooks to post-warranty; manual CSV provisioning for the MVP. |
+| R9 | Indicator definitions unstable across the 15 days | Medium | High | Freeze the indicator manifest contract by Day 6; written MERL approval required for any change. |
+| R10 | Indicator SQL expressions pose injection risk | Low | High | Strict SQL parser deny-list blocks `pg_sleep`, network calls, and privileged extensions. |
+| R11 | GitHub Actions overage budget over-runs | Low | Medium | Cadence tightening rule per §5.4; transparently renegotiate with Cordaid ICT if cadence is shortened below 10 minutes. |
 
 ---
 
 ## 13. Open Questions for the Next Round
 
-The following items are pre-decided in this proposal and benefit from explicit Cordaid sign-off before contract signature:
+The following items are pre-decided in this proposal and benefit from explicit Cordaid sign-off before contract signature. Each is stated with its proposed default:
 
-1. **Subdomain scheme.** Three subdomains (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`) or subpaths on a single domain. Default proposed: three subdomains.
-2. **HRIS integration timing.** Manual provisioning + CSV import for MVP, HRIS webhook as a post-warranty enhancement. Default proposed: MVP-first.
-3. **SSO providers.** Google + Microsoft by default. Any specific identity provider (Okta, ADFS, Cordaid internal IdP)?
-4. **Password policy confirmation.** Confirm at Day-1 inception that the §4.2 NIST-aligned password rules (14-character minimum, argon2id with per-user salt, rotated on compromise evidence only) match Cordaid ICT's password-policy guidance.
-5. **External partners.** List of partners per application at handover, including scope definitions, so we can seed `users.scope`.
-6. **Indicator definitions sign-off date.** Must precede Day 7 to freeze the indicator manifest.
-7. **Targets and workplan sign-off date.** Same logic.
-8. **Retention periods.** Defaults are 36 months for clean, 5 years for audit, 90 days for refresh_log. Confirm or override.
-9. **Small-cell floor.** Default 5. Confirm, or specify per-indicator overrides now.
-10. **Custom domain / DNS responsibility.** Cordaid ICT or this consultant?
-11. **MERL + ICT contact persons.** For daily sync during the 15-day build and during the 30-day warranty.
-12. **GitHub organisation readiness.** Confirm with Cordaid ICT at Day-1 inception that the Cordaid-owned GitHub organisation is ready to host four private repositories (three applications plus the shared core) and a GitHub Packages namespace, with the consultant working from a fork or non-admin role. This locks brief §11's ownership-by-Cordaid requirement from Day 1 and avoids discoverability or permissions issues during Days 1–3.
+1. **Subdomain scheme.** Default: three subdomains (`cordaid.client.org`, `wework.client.org`, `agrip.client.org`).
+2. **HRIS integration timing.** Default: MVP-first (manual provisioning + CSV import; HRIS webhook deferred to post-warranty).
+3. **SSO providers.** Default: Google + Microsoft.
+4. **Password policy.** Default: NIST-aligned per §4.2.
+5. **External partners.** Default: Cordaid supplies scope-mapping list at handover.
+6. **Indicator definitions sign-off date.** Required by Day 6 to freeze the indicator manifest.
+7. **Targets and workplan sign-off date.** Required by Day 6.
+8. **Retention periods.** Default: clean 36 months, audit 5 years, refresh_log 90 days.
+9. **Small-cell floor.** Default: 5.
+10. **Custom domain / DNS responsibility.** Default: Cordaid ICT.
+11. **MERL + ICT contact persons.** Default: assigned by Day 1.
+12. **GitHub organisation readiness.** Default: Cordaid-owned, ready by Day 1 (four private repositories plus a GitHub Packages namespace).
 
-Each item has a default in this proposal. We propose a single Q&A session to lock these items before contract signature.
+A single Q&A session is proposed to lock these items before contract signature.
 
 ---
 
 ## 14. Sign-off
 
-This proposal is the consulting team's recommendation as of the date above. Upon Cordaid sign-off, we proceed to Day 1 (Inception) and lock the open questions in §13. Any change to the RBAC matrix (§4.3), the sync cadence (§5.1), or the retention model (§8.3) after sign-off is treated as a change order per the brief's §12 *Warranty and Change Control*.
+This proposal is the consultant's recommendation as of the date above. Upon Cordaid sign-off, the engagement proceeds to Day 1 (Inception) and the open questions in §13 are locked. Any change to the RBAC matrix (§4.3), the sync cadence (§5.1), or the retention model (§8.3) after sign-off is treated as a change order per the brief's §12 *Warranty and Change Control*.
 
-We welcome the MERL Manager and the technical review panel to review this proposal at their convenience; we are available for clarification at the contacts in §13.
+The MERL Manager and the technical review panel are welcome to review this proposal at their convenience; the consultant is available for clarification at the contacts in §13.
 
 **Josh Eleazar**, Lead Engineer
